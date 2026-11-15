@@ -1,0 +1,6 @@
+# Site configuration for the TerraKernel demo (titles only; everything else on the site is
+# generated from the repository). The *_zh keys are shown when the reader switches to Chinese.
+title: Farm Delta forecast evaluation
+title_zh: Farm Delta 风电预测评测
+hero_title: A research repository, compiled from the materials
+hero_title_zh: 从资料编译出来的科研仓库

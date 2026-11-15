@@ -1,0 +1,26 @@
+goal: >-
+  Evaluate and compare day-ahead wind power forecasts for Farm Delta against measurements,
+  following the group's evaluation convention, and explain the results with traceable sources.
+tasks:
+  - id: compare-forecast-models
+    title: Compare forecast models A and B
+    prompt: >-
+      Compare forecast model A and forecast model B for Farm Delta over 2023 against the measured power.
+      Report MAE and RMSE in MW and NRMSE in percent according to the group's evaluation convention,
+      the number of hours used, and state the unit conversions, timestamp alignment and sample selection
+      you applied. List anything the materials leave unresolved.
+    acceptance:
+      - Errors are computed and reported in the units required by the group's evaluation convention.
+      - Forecasts and measurements are paired according to the documented timestamp conventions of each file.
+      - Sample selection and missing-value handling follow the documented convention.
+      - Normalised errors follow the documented convention, including any documented time-varying parameters.
+      - Information the materials do not provide is reported as an open issue instead of being assumed.
+    expected: expected/compare-forecast-models.json
+    report_values:
+      - {name: a_mae_mw, description: MAE of model A, unit: MW}
+      - {name: a_rmse_mw, description: RMSE of model A, unit: MW}
+      - {name: a_nrmse_pct, description: NRMSE of model A under the group's convention, unit: "%"}
+      - {name: b_mae_mw, description: MAE of model B, unit: MW}
+      - {name: b_rmse_mw, description: RMSE of model B, unit: MW}
+      - {name: b_nrmse_pct, description: NRMSE of model B under the group's convention, unit: "%"}
+      - {name: hours_used, description: Number of hours used in the comparison, unit: h}

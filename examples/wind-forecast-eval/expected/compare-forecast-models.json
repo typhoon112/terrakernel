@@ -1,0 +1,103 @@
+{
+  "task": "compare-forecast-models",
+  "values": {
+    "a_mae_mw": {
+      "value": 10.65565,
+      "rel_tol": 0.001,
+      "abs_tol": 0.0005
+    },
+    "a_rmse_mw": {
+      "value": 18.872447,
+      "rel_tol": 0.001,
+      "abs_tol": 0.0005
+    },
+    "a_nrmse_pct": {
+      "value": 17.233638,
+      "rel_tol": 0.001,
+      "abs_tol": 0.0005
+    },
+    "b_mae_mw": {
+      "value": 9.480767,
+      "rel_tol": 0.001,
+      "abs_tol": 0.0005
+    },
+    "b_rmse_mw": {
+      "value": 16.869806,
+      "rel_tol": 0.001,
+      "abs_tol": 0.0005
+    },
+    "b_nrmse_pct": {
+      "value": 15.471921,
+      "rel_tol": 0.001,
+      "abs_tol": 0.0005
+    },
+    "hours_used": {
+      "value": 8640,
+      "rel_tol": 0.0,
+      "abs_tol": 0
+    }
+  },
+  "variants": {
+    "model_b_not_converted_from_kw": {
+      "a_mae_mw": 10.65565,
+      "a_rmse_mw": 18.872447,
+      "a_nrmse_pct": 17.233638,
+      "b_mae_mw": 36302.305144,
+      "b_rmse_mw": 54887.863257,
+      "b_nrmse_pct": 50032.246603,
+      "hours_used": 8640
+    },
+    "model_a_timestamps_not_aligned": {
+      "a_mae_mw": 12.504563,
+      "a_rmse_mw": 22.005283,
+      "a_nrmse_pct": 20.08231,
+      "b_mae_mw": 9.481386,
+      "b_rmse_mw": 16.870728,
+      "b_nrmse_pct": 15.472775,
+      "hours_used": 8639
+    },
+    "missing_values_filled_with_zero": {
+      "a_mae_mw": 11.020743,
+      "a_rmse_mw": 19.986697,
+      "a_nrmse_pct": 18.075525,
+      "b_mae_mw": 9.610111,
+      "b_rmse_mw": 17.290128,
+      "b_nrmse_pct": 15.808,
+      "hours_used": 8760
+    },
+    "no_common_sample": {
+      "a_mae_mw": 10.677822,
+      "a_rmse_mw": 18.879814,
+      "a_nrmse_pct": 17.239171,
+      "b_mae_mw": 9.443664,
+      "b_rmse_mw": 16.827235,
+      "b_nrmse_pct": 15.432222
+    },
+    "nrmse_with_constant_100mw_capacity": {
+      "a_nrmse_pct": 18.872447,
+      "b_nrmse_pct": 16.869806
+    },
+    "nrmse_normalised_by_mean_measured_power": {
+      "a_nrmse_pct": 58.896027,
+      "b_nrmse_pct": 52.646303
+    },
+    "capacity_looked_up_at_interval_end": {
+      "a_nrmse_pct": 17.233636,
+      "b_nrmse_pct": 15.471921
+    }
+  },
+  "required_open_issues": [
+    {
+      "id": "model_b_lead_time_unknown",
+      "description": "The issue time / lead time of model B is not documented.",
+      "any_of": [
+        "lead time",
+        "issue time",
+        "issued",
+        "issuance",
+        "horizon"
+      ]
+    }
+  ],
+  "notes": "hours_used counts hours where the measurement and both forecasts are available after aligning model A."
+}

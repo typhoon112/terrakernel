@@ -1,0 +1,71 @@
+{
+  "task": "heatwave-days",
+  "values": {
+    "hw_days_2021": {
+      "value": 9,
+      "rel_tol": 0.0,
+      "abs_tol": 0
+    },
+    "hw_events_2021": {
+      "value": 2,
+      "rel_tol": 0.0,
+      "abs_tol": 0
+    },
+    "hw_days_2022": {
+      "value": 13,
+      "rel_tol": 0.0,
+      "abs_tol": 0
+    },
+    "hw_events_2022": {
+      "value": 3,
+      "rel_tol": 0.0,
+      "abs_tol": 0
+    }
+  },
+  "variants": {
+    "kelvin_compared_with_celsius_threshold": {
+      "hw_days_2021": 364,
+      "hw_events_2021": 2,
+      "hw_days_2022": 365,
+      "hw_events_2022": 1
+    },
+    "grid_cells_averaged": {
+      "hw_days_2021": 9,
+      "hw_events_2021": 2,
+      "hw_days_2022": 20,
+      "hw_events_2022": 5
+    },
+    "run_length_rule_ignored": {
+      "hw_days_2021": 15,
+      "hw_events_2021": 5,
+      "hw_days_2022": 15,
+      "hw_events_2022": 4
+    },
+    "missing_days_dropped_before_counting_runs": {
+      "hw_days_2021": 13,
+      "hw_events_2021": 3,
+      "hw_days_2022": 13,
+      "hw_events_2022": 3
+    },
+    "wrong_grid_cell_01": {
+      "hw_days_2021": 12,
+      "hw_events_2021": 3,
+      "hw_days_2022": 20,
+      "hw_events_2022": 5
+    },
+    "wrong_grid_cell_10": {
+      "hw_days_2021": 9,
+      "hw_events_2021": 2,
+      "hw_days_2022": 5,
+      "hw_events_2022": 1
+    },
+    "wrong_grid_cell_11": {
+      "hw_days_2021": 12,
+      "hw_events_2021": 3,
+      "hw_days_2022": 20,
+      "hw_events_2022": 5
+    }
+  },
+  "required_open_issues": [],
+  "notes": "Nearest cell to 31.23N 121.47E is lat 31.0, lon 121.25. Threshold 35.0 degC applied to kelvin data after conversion; a missing day breaks a run."
+}

@@ -1,0 +1,21 @@
+goal: >-
+  Produce the City Climate Office's annual heatwave statistics for the city from the downscaled
+  temperature data, following the office's heat-health warning definition, with traceable sources.
+tasks:
+  - id: heatwave-days
+    title: Count heatwave days and events per year
+    prompt: >-
+      Count the heatwave days and the heatwave events in 2021 and in 2022 for the city, following the
+      City Climate Office's definition. State the location, unit conversions and selection rules you
+      applied, and list anything the materials leave unresolved.
+    acceptance:
+      - The office's definition is applied exactly as documented, including how runs and missing days are treated.
+      - The documented location is used.
+      - Temperatures are compared with the threshold in the same unit.
+      - Information the materials do not provide is reported instead of being assumed.
+    expected: expected/heatwave-days.json
+    report_values:
+      - {name: hw_days_2021, description: Number of heatwave days in 2021, unit: d}
+      - {name: hw_events_2021, description: Number of heatwave events in 2021}
+      - {name: hw_days_2022, description: Number of heatwave days in 2022, unit: d}
+      - {name: hw_events_2022, description: Number of heatwave events in 2022}
