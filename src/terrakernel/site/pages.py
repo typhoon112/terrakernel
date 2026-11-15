@@ -588,7 +588,9 @@ def repo_page(data: SiteData) -> str:
     for kind in ("config", "runtime", "tool", "test", "computation_doc", "knowledge_doc", "skill", "entry", "adapter", "source"):
         for a in kinds.get(kind, []):
             href = "download/repo.zip" if a.kind == "source" else f"files/{_slug(a.path)}.html"
-            rows.append(f'<tr><td class="mono"><a href="{href}">{escape(a.path)}</a></td>'
+            path_label = (f'<a href="{href}">{escape(a.path)}</a>' if (data.project.repo / a.path).exists()
+                          else escape(a.path))
+            rows.append(f'<tr><td class="mono">{path_label}</td>'
                         f'<td>{escape(kind)}</td><td>{_badge(a.status, a.status)}</td>'
                         f'<td class="mono small">{len(a.objects)}</td>'
                         f'<td class="small">{escape(", ".join(a.depends_on[:3]))}{"…" if len(a.depends_on) > 3 else ""}</td></tr>')
