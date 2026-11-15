@@ -3,6 +3,7 @@
 - 先读 [README.md](README.md)，在本目录内开展黑客松项目开发。
 - 本项目是独立的科研资料编译工具；核心框架保持领域无关。
 - 产品范围、安装和使用流程维护在 README；更新行为时同步维护相关说明。
+- 当前开发优先级和完成标准以 README 的 [产品交付与下一步](README.md#产品交付与下一步) 为准；围绕外部资料接入复用现有流水线，明确区分已实现、待实现和待验收。
 - 不因本项目开发修改其他项目；需要参考其他项目时按任务要求只读查看。
 
 ## 开发命令
@@ -11,7 +12,7 @@
 - 静态检查：`uv run ruff check src examples tests`。
 - 离线测试（不调用模型）：`uv run pytest tests`。
 - 模型端点检查：`uv run terrakernel doctor`。
-- 端到端（会调用模型并产生费用，结果写入 `artifacts/YYYYMMDD/<任务>/`）：按 README “示例与进阶命令”一节依次执行 `init`、`build`、`validate`、`eval`。
+- 端到端（会调用模型并产生费用，结果写入 `artifacts/YYYYMMDD/<任务>/`）：按 README 的资料导入流程执行 `init`、`build`、`validate`，核对产物使用；涉及资料更新时验证 `update`。对比实验需要时再执行 `eval`，普通导入不以评测为前置。
 
 ## 约定
 
