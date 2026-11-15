@@ -19,13 +19,13 @@ TerraKernel 是 AI4Climate 黑客松参赛项目，也是一个可在本机运�
 
 交付给使用者的是 **可安装的 TerraKernel 命令行工具、使用说明和完整示例**。本 GitHub 仓库提供工具源码；使用者输入自己的外部资料和研究目标后，工具生成可交给 Agent 使用的科研仓库。这里的“输入入口”指资料接入，第一版使用本地资料目录。
 
-当前已有分开的 `init`、`build` 命令和完整构建流水线，以及更新、人工回答和静态展示能力。下一阶段按以下顺序完善使用流程；这些是待完成的交付要求：
+当前已提供统一构建入口：一次输入资料目录、研究目标和输出目录，即可初始化并启动完整构建。普通构建不要求任务 YAML 或标准答案；原有分开的 `init`、`build` 命令继续可用。
 
-1. **统一构建入口。** 一次调用接收资料目录、研究目标和输出目录，复用现有初始化与构建流程，并保留已有命令。普通构建不要求任务 YAML 或标准答案。完成标准：首次使用者按一条文档命令即可从自己的资料开始构建，无须修改源码或示例配置。
-2. **完善导入反馈和结果交接。** 明确列出已识别、已解析、跳过和解析失败的文件及原因；输入无效或构建失败时给出可操作提示。完成后输出生成目录、`AGENTS.md` 入口、待确认问题及更新方式。完成标准：使用者能确认哪些资料实际参与构建，并知道失败后如何处理、成功后如何使用结果。
-3. **完成独立交付验收。** 核对完整构建所需的运行依赖，从分发包在干净环境安装，用一批内置样例之外的资料走通导入、构建、验证、产物使用和资料更新。完成标准：生成仓库的知识、工具和 Skills 可从统一入口找到并使用，流程不依赖开发机路径或样例专用配置；仅安装成功或运行 `init` 不代表该项完成。
+导入过程会报告文件的解析、跳过和失败情况；成功后给出生成目录、`AGENTS.md` 入口、待确认问题及后续操作。已有更新、人工回答和静态展示能力继续复用同一套仓库与流水线。
 
-实施时复用现有模块与流水线，优先完成上述资料接入流程。模型对比评测用于补充验证，网页用于浏览结果；它们不作为第一版资料输入入口的交付前提。
+**下一步：独立交付验收。** 用分发包在干净环境安装，以内置样例之外的真实资料走通导入、完整模型构建、验证、产物使用和资料更新。完成标准：生成仓库的知识、工具和 Skills 可从统一入口找到并使用，流程不依赖开发机路径或样例专用配置。该项仍待验收；安装成功、运行初始化或离线检查通过不代表它已经完成。
+
+模型对比评测用于补充验证，网页用于浏览结果；它们不作为第一版资料输入入口的交付前提。
 
 ## 设计原则
 
@@ -48,41 +48,42 @@ TerraKernel 是 AI4Climate 黑客松参赛项目，也是一个可在本机运�
 下载或克隆本仓库后，在项目根目录执行：
 
 ```bash
-uv sync
-uv run terrakernel --help
+uv tool install .
+terrakernel --help
 ```
+
+这会将 TerraKernel 安装为独立命令，之后可以在自己的工作目录运行。如果命令未出现在 PATH 中，执行 `uv tool update-shell` 并重新打开终端。开发本项目时使用 `uv sync` 和 `uv run terrakernel`；以下示例中的 `terrakernel` 也可替换为该开发命令。
 
 支持的资料格式：PDF（含双栏排版）、Markdown、纯文本、CSV/TSV、Excel（按工作表）、Parquet、NetCDF（读取文件自带的单位、cell_methods 等属性）、Python 脚本与 Notebook、图片。
 
 大模型调用使用 Anthropic Python SDK。运行前在环境变量中配置 `ANTHROPIC_API_KEY` 或 `ANTHROPIC_AUTH_TOKEN`；使用兼容网关时同时设置 `ANTHROPIC_BASE_URL`。密钥不写入项目文件。
 
-`uv run terrakernel doctor` 用于检查模型端点及其结构化输出支持；程序会为不支持原生结构化输出的端点尝试兼容方式。模型可在初始化时通过 `--model` 指定。
+`terrakernel doctor` 用于检查模型端点及其结构化输出支持；程序会为不支持原生结构化输出的端点尝试兼容方式。模型可在首次构建或初始化时通过 `--model` 指定。
 
 ## 使用自己的资料
 
-外部资料的入口是一个目录。把论文、说明、数据和已有代码放在该目录中，再提供一句研究目标；任务文件和标准答案都不是构建的必填项。当前版本需要分别执行 `init` 和 `build`。
+外部资料的入口是一个目录。把论文、说明、数据和已有代码放在该目录中，再提供一句研究目标；任务文件和标准答案都不是构建的必填项。未提供任务或任务列表为空时，研究目标会成为默认任务 `research-goal`，供后续规划对应的知识、工具和 Skill。
 
-以下命令在本仓库根目录运行。将 `/path/to/materials` 替换为资料目录，将 `YYYYMMDD` 替换为运行日期。生成结果和运行记录放在已忽略的 `artifacts/` 内。
+安装后可以在自己的项目目录运行。将 `/path/to/materials` 替换为资料目录，将 `YYYYMMDD` 替换为运行日期。输出路径相对于当前目录；在 TerraKernel 源码仓库内运行时，示例中的 `artifacts/` 已由 Git 忽略。
 
 ```bash
-# 初始化：只创建项目配置，不调用模型
-uv run terrakernel init /path/to/materials \
+# 一条命令创建项目并构建知识、工具、Skills 和统一入口
+terrakernel build /path/to/materials \
   --goal "整理这些科研资料，支持城市热浪分析" \
   --output artifacts/YYYYMMDD/my-research
 
-# 构建：调用模型，生成知识、工具、Skills 和统一入口
-uv run terrakernel build artifacts/YYYYMMDD/my-research
-
 # 查看结果和需要补充的信息
-uv run terrakernel status artifacts/YYYYMMDD/my-research
-uv run terrakernel gaps artifacts/YYYYMMDD/my-research
+terrakernel status artifacts/YYYYMMDD/my-research
+terrakernel gaps artifacts/YYYYMMDD/my-research
 ```
 
-构建后，先阅读生成目录中的 `AGENTS.md`，再让 Agent 打开该目录开展任务。资料变化后，对同一生成目录执行 `terrakernel update`；需要浏览或下载结果时执行 `terrakernel site` 导出静态页面。静态页面目前不提供上传或发起构建功能。
+首次构建使用新的或空的输出目录，不覆盖已有项目。已有项目继续使用 `terrakernel build <生成目录>`；修复导入失败的文件后也可用该命令重试。文件导入报告保存在生成目录的 `.terrakernel/ingest-report.json`，用于查看文件状态及原因。遇到解析失败时，构建停止，修正对应资料后再运行。
+
+构建后，先阅读生成目录中的 `AGENTS.md`，再让 Agent 打开该目录开展任务。资料变化后，对同一生成目录执行 `terrakernel update <生成目录>`；需要浏览或下载结果时执行 `terrakernel site <生成目录>` 导出静态页面。静态页面目前不提供上传或发起构建功能。
 
 ## 示例与进阶命令
 
-以开发样例（风电预测评测，合成数据）为例：
+以下命令在源码仓库根目录运行，以开发样例（风电预测评测，合成数据）为例。需要先查看或调整配置再构建时，仍可使用分开的 `init` 和 `build`：
 
 ```bash
 # 1. 创建仓库：指定资料目录、研究目标和任务

@@ -9,6 +9,7 @@ changed.
 
 from __future__ import annotations
 
+import json
 import time
 import traceback
 from collections.abc import Callable
@@ -25,26 +26,72 @@ STAGES = ["ingest", "extract", "reconcile", "plan", "compile", "validate"]
 
 
 # ---------------------------------------------------------------- ingest
+class IngestError(ValueError):
+    """An unsuccessful import with a report that the CLI can still display."""
+
+    def __init__(self, message: str, report: dict[str, Any]):
+        super().__init__(message)
+        self.report = report
+
+
 def run_ingest(project: Project, llm: LLMClient | None = None, **_: Any) -> dict[str, Any]:
-    kb = project.kb
-    sources, skipped = scan_materials(project.materials_dir)
+    files: list[dict[str, Any]] = []
+    report: dict[str, Any] = {"status": "running", "files": files}
+
+    def save_report(status: str) -> None:
+        report["status"] = status
+        report["summary"] = {
+            "recognized": sum(f["status"] != "skipped" for f in files),
+            **{state: sum(f["status"] == state for f in files)
+               for state in ("parsed", "unchanged", "skipped", "failed")},
+            "evidence": sum(f.get("evidence", 0) for f in files),
+        }
+        project.state.mkdir(parents=True, exist_ok=True)
+        (project.state / "ingest-report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False))
+
+    def fail(message: str) -> None:
+        report["error"] = message
+        save_report("failed")
+        raise IngestError(message, report)
+
+    if not project.materials_dir.is_dir():
+        fail(f"Materials directory does not exist: {project.materials_dir}. Restore it or update the materials path.")
+    try:
+        sources, skipped = scan_materials(project.materials_dir)
+    except (OSError, ValueError) as e:
+        fail(f"Could not read the materials directory: {e}. Check file access and retry.")
+    files.extend({"path": path, "status": "skipped", "reason": "Unsupported file format"} for path in skipped)
     sources = [s for s in sources if s.id != HUMAN_SOURCE_ID]
     if project.answers_path.exists():
         sources.append(Source(id=HUMAN_SOURCE_ID, path=HUMAN_SOURCE_FILE, kind=SourceKind.markdown,
                               sha256=sha256_file(project.answers_path), size=project.answers_path.stat().st_size,
                               media_type="text/markdown", title="Answers recorded by people", meta={"managed": True}))
+    report.update(sources=len(sources), skipped=skipped)
+    if not sources:
+        fail("No supported materials found. Add a supported document, data file, code file or image and retry.")
+    kb = project.kb
     existing = {s.id: s for s in kb.sources()}
     diff: dict[str, dict[str, list[str]]] = {}
     changed: list[str] = []
+    parsed = []
     for s in sources:
         old = existing.get(s.id)
         old_ev = {e.id: e.content_hash for e in kb.evidence(s.id)} if old else {}
         if old and old.sha256 == s.sha256 and old_ev:
+            files.append({"path": s.path, "kind": s.kind.value, "status": "unchanged", "evidence": len(old_ev)})
             continue
         project.emit("ingest", "progress", f"parsing {s.path}")
-        evs = ingest_file(s, project.source_file(s), project.assets_dir)
-        kb.upsert_source(s)
-        kb.replace_evidence(s.id, evs)
+        try:
+            evs = ingest_file(s, project.source_file(s), project.assets_dir)
+            if not evs:
+                raise ValueError("No extractable evidence; check that the file contains readable material")
+        except Exception as e:
+            reason = f"{type(e).__name__}: {e}"
+            files.append({"path": s.path, "kind": s.kind.value, "status": "failed", "reason": reason})
+            project.emit("ingest", "warning", f"{s.path}: {reason}", source=s.id)
+            continue
+        parsed.append((s, evs))
+        files.append({"path": s.path, "kind": s.kind.value, "status": "parsed", "evidence": len(evs)})
         new_ev = {e.id: e.content_hash for e in evs}
         diff[s.id] = {
             "added": sorted(set(new_ev) - set(old_ev)),
@@ -54,6 +101,14 @@ def run_ingest(project: Project, llm: LLMClient | None = None, **_: Any) -> dict
         }
         changed.append(s.id)
         project.emit("ingest", "item", f"{s.path}: {len(evs)} evidence units", source=s.id, evidence=len(evs))
+    failed = [f["path"] for f in files if f["status"] == "failed"]
+    if failed:
+        fail(f"Could not parse {len(failed)} file(s): {', '.join(failed)}. "
+             "Fix or remove these files and retry; the knowledge base has not been changed.")
+    # Commit only after every supported file parses, so a retry preserves the full update diff.
+    for s, evs in parsed:
+        kb.upsert_source(s)
+        kb.replace_evidence(s.id, evs)
     current = {s.id for s in sources}
     removed = [sid for sid in existing if sid not in current]
     for sid in removed:
@@ -62,8 +117,10 @@ def run_ingest(project: Project, llm: LLMClient | None = None, **_: Any) -> dict
         diff[sid] = {"added": [], "removed": ["*"], "changed": [], "new_source": []}
     kb.set_meta("last_ingest_diff", diff)
     stats = kb.stats()
-    return {"sources": len(sources), "changed": changed, "removed": removed, "skipped": skipped,
-            "evidence": stats["evidence"], "evidence_by_kind": stats["evidence_by_kind"]}
+    report.update(changed=changed, removed=removed, evidence=stats["evidence"],
+                  evidence_by_kind=stats["evidence_by_kind"])
+    save_report("done")
+    return report
 
 
 # ---------------------------------------------------------------- extract
@@ -161,10 +218,13 @@ class Pipeline:
         t0 = time.time()
         try:
             report = STAGE_FUNCS[name](project, self.llm, force=force)
-            status = "done"
-            error = None
+            failed_checks = report.get("fail", 0) or report.get("summary", {}).get("fail", 0)
+            status = "failed" if failed_checks else "done"
+            error = f"{failed_checks} validation check(s) failed; review the validation report." if failed_checks else None
+            if error:
+                project.emit(name, "error", error)
         except Exception as e:  # recorded and surfaced; the stage can be retried
-            report = {}
+            report = e.report if isinstance(e, IngestError) else {}
             status = "failed"
             error = f"{type(e).__name__}: {e}"
             project.emit(name, "error", error, traceback=traceback.format_exc()[-4000:])

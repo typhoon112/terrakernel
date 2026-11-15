@@ -25,6 +25,7 @@ dependencies = [
     "pyarrow>=17",
     "xarray>=2024.6",
     "netcdf4>=1.7",
+    "pytest>=8",
 ]
 
 [project.scripts]
@@ -32,7 +33,6 @@ terrakernel = "terrakernel.cli:app"
 
 [dependency-groups]
 dev = [
-    "pytest>=8",
     "ruff>=0.15",
     "reportlab>=4",
     "matplotlib>=3.9",

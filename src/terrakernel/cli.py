@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Annotated, Any
 import typer
 import yaml
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from terrakernel import __version__
@@ -35,15 +37,79 @@ def _llm(project: Project | None = None, model: str | None = None):
 def _load_tasks(tasks_file: Path | None) -> list[TaskSpec]:
     if not tasks_file:
         return []
-    data = yaml.safe_load(tasks_file.read_text())
+    try:
+        data = yaml.safe_load(tasks_file.read_text())
+    except (OSError, yaml.YAMLError) as exc:
+        raise typer.BadParameter(f"Cannot read tasks file {tasks_file}: {exc}") from exc
     items = data.get("tasks", data) if isinstance(data, dict) else data
+    if not isinstance(items, list) or any(not isinstance(t, dict) for t in items):
+        raise typer.BadParameter("Tasks must be a YAML list, or a mapping containing a 'tasks' list.")
     tasks = []
     for t in items:
         t = dict(t)
         if t.get("expected"):
             t["expected"] = str((tasks_file.parent / t["expected"]).resolve())
-        tasks.append(TaskSpec.model_validate(t))
+        try:
+            tasks.append(TaskSpec.model_validate(t))
+        except ValueError as exc:
+            raise typer.BadParameter(f"Invalid task in {tasks_file}: {exc}") from exc
     return tasks
+
+
+def _create_project(materials: Path, output: Path, goal: str, tasks: Path | None,
+                    name: str | None, model: str | None) -> Project:
+    materials, output = materials.resolve(), output.resolve()
+    if not materials.is_dir():
+        raise typer.BadParameter(f"Materials directory does not exist: {materials}")
+    if not goal.strip():
+        raise typer.BadParameter("Provide a non-empty research goal with --goal.")
+    if output == materials or materials in output.parents:
+        raise typer.BadParameter("Choose an output directory outside the materials directory.")
+    if (output / ".terrakernel" / "project.yaml").exists():
+        raise typer.BadParameter(f"Repository already exists. Continue with: terrakernel build {shlex.quote(str(output))}")
+    if output.exists() and (not output.is_dir() or any(output.iterdir())):
+        raise typer.BadParameter(f"Output is not an empty directory: {output}. Choose a new output directory.")
+    research_tasks = _load_tasks(tasks) or [TaskSpec(id="research-goal", title="Research goal", prompt=goal.strip())]
+    cfg = ProjectConfig(name=name or output.name, goal=goal.strip(), materials=str(materials),
+                        tasks=research_tasks, model=resolve_model(model))
+    return Project.create(output, cfg)
+
+
+def _print_ingest_report(project: Project) -> None:
+    path = project.state / "ingest-report.json"
+    if not path.exists():
+        return
+    report = json.loads(path.read_text())
+    table = Table(title="Imported materials")
+    for col in ("file", "status", "evidence", "detail"):
+        table.add_column(col)
+    for item in report.get("files", []):
+        table.add_row(escape(item["path"]), item["status"], str(item.get("evidence", "")),
+                      escape(item.get("reason", "")))
+    console.print(table)
+    console.print(f"Import report: {path}", markup=False)
+
+
+def _print_build_outcome(project: Project, results: dict) -> None:
+    repo = shlex.quote(str(project.repo))
+    failed = next((stage for stage, result in results.items() if result["status"] == "failed"), None)
+    if failed:
+        console.print(f"Build stopped at {failed}. Fix the reported issue, then retry:", markup=False)
+        console.print(f"  terrakernel build {repo}", markup=False)
+        if failed == "validate":
+            console.print(f"Validation details: {project.validation_path}", markup=False)
+        return
+    if "validate" not in results:
+        console.print("Selected stages finished. Continue the full build with:")
+        console.print(f"  terrakernel build {repo}", markup=False)
+        return
+    console.print("[bold green]Repository ready[/]")
+    console.print(f"Output: {project.repo}\nStart here: {project.repo / 'AGENTS.md'}", markup=False)
+    console.print("Open this directory in your Agent and follow AGENTS.md to use its knowledge, tools and skills.")
+    gaps = _open_gaps(project)
+    console.print(f"Open questions: {len(gaps)}. Review with: terrakernel gaps {repo}", markup=False)
+    console.print(f"After changing your materials: terrakernel update {repo}", markup=False)
+    console.print(f"Export a preview: terrakernel site {repo}", markup=False)
 
 
 def _print_stage_results(results: dict) -> None:
@@ -76,42 +142,70 @@ def init(
     model: Annotated[str | None, typer.Option(help="Model used for building (alias: opus|sonnet|haiku)")] = None,
 ) -> None:
     """Create a TerraKernel repository for a set of materials (no model calls)."""
-    materials = materials.resolve()
-    if not materials.is_dir():
-        raise typer.BadParameter(f"{materials} is not a directory")
-    cfg = ProjectConfig(
-        name=name or output.resolve().name,
-        goal=goal,
-        materials=str(materials),
-        tasks=_load_tasks(tasks),
-        model=resolve_model(model),
-    )
-    project = Project.create(output, cfg)
-    console.print(f"Initialised [bold]{cfg.name}[/] at {project.repo} ({len(cfg.tasks)} task(s)).")
+    project = _create_project(materials, output, goal, tasks, name, model)
+    console.print(f"Initialised {project.config.name} at {project.repo} ({len(project.config.tasks)} task(s)).",
+                  markup=False)
+    console.print(f"Next: terrakernel build {shlex.quote(str(project.repo))}", markup=False)
 
 
 @app.command()
 def build(
-    repo: Annotated[Path, typer.Argument(help="Repository created with `terrakernel init`")],
+    repo: Annotated[Path, typer.Argument(help="Materials directory with --goal and --output, or an existing repository")],
     start: Annotated[str | None, typer.Option("--from", help="First stage to run")] = None,
     until: Annotated[str | None, typer.Option(help="Last stage to run")] = None,
     only: Annotated[str | None, typer.Option(help="Comma-separated stages to run")] = None,
     force: Annotated[bool, typer.Option(help="Ignore fingerprints and redo work")] = False,
+    goal: Annotated[str | None, typer.Option(help="Research goal for a new repository")] = None,
+    output: Annotated[Path | None, typer.Option("--output", "-o", help="New repository directory")] = None,
+    tasks: Annotated[Path | None, typer.Option(help="Optional YAML file with research tasks")] = None,
+    name: Annotated[str | None, typer.Option(help="Name for a new repository")] = None,
+    model: Annotated[str | None, typer.Option(help="Build model for a new repository (opus|sonnet|haiku or model ID)")] = None,
 ) -> None:
-    """Run the build pipeline: ingest, extract, reconcile, plan, compile, validate."""
-    from terrakernel.runner import Pipeline
+    """Build directly from materials, or continue building an existing repository."""
+    from terrakernel.runner import STAGES, Pipeline
 
-    project = Project.open(repo)
+    selected = [s.strip() for s in only.split(",")] if only is not None else None
+    requested = [s for s in (start, until) if s is not None] + (selected or [])
+    if any(s not in STAGES for s in requested):
+        raise typer.BadParameter(f"Unknown stage. Choose from: {', '.join(STAGES)}")
+    if selected is not None and (start is not None or until is not None):
+        raise typer.BadParameter("Use either --only or --from/--until.")
+    if start and until and STAGES.index(start) > STAGES.index(until):
+        raise typer.BadParameter("--from must not come after --until.")
+    if output is not None:
+        if goal is None:
+            raise typer.BadParameter("Provide --goal when building from materials with --output.")
+        if (start and start != "ingest") or (selected is not None and "ingest" not in selected):
+            raise typer.BadParameter("A new repository must start with ingest.")
+        project = _create_project(repo, output, goal, tasks, name, model)
+        console.print(f"Creating repository: {project.repo}", markup=False)
+    else:
+        if any(value is not None for value in (goal, tasks, name, model)):
+            raise typer.BadParameter("New repository options require --output. To continue, use: terrakernel build REPO")
+        try:
+            project = Project.open(repo)
+        except FileNotFoundError as exc:
+            raise typer.BadParameter("To build from materials, provide --goal TEXT --output REPO. "
+                                     "Otherwise choose an existing TerraKernel repository.") from exc
+
+    def show_progress(event: dict) -> None:
+        if event["kind"] in ("stage_start", "item", "warning", "error", "stage_end"):
+            console.print(f"[dim]{event['at'][11:19]}[/] [cyan]{event['stage']:<9}[/] {escape(event['message'])}")
+        if event["stage"] == "ingest" and event["kind"] == "stage_end":
+            _print_ingest_report(project)
+
     llm = _llm(project, project.config.model)
-    project.add_listener(lambda e: console.print(f"[dim]{e['at'][11:19]}[/] [cyan]{e['stage']:<9}[/] {e['message']}")
-                         if e["kind"] in ("stage_start", "item", "warning", "error", "stage_end") else None)
-    results = Pipeline(project, llm).run(start=start, until=until, force=force,
-                                         only=only.split(",") if only else None)
-    _print_stage_results(results)
-    usage = llm.usage.as_dict()
-    console.print(f"model calls: {usage['calls']} (+{usage['cached_responses']} cached), "
-                  f"tokens in/out: {usage['input_tokens'] + usage['cache_read_tokens'] + usage['cache_write_tokens']}/"
-                  f"{usage['output_tokens']}, estimated cost: ${usage['cost_usd_estimate']:.3f}")
+    project.add_listener(show_progress)
+    try:
+        results = Pipeline(project, llm).run(start=start, until=until, force=force, only=selected)
+        _print_stage_results(results)
+        usage = llm.usage.as_dict()
+        console.print(f"model calls: {usage['calls']} (+{usage['cached_responses']} cached), "
+                      f"tokens in/out: {usage['input_tokens'] + usage['cache_read_tokens'] + usage['cache_write_tokens']}/"
+                      f"{usage['output_tokens']}, estimated cost: ${usage['cost_usd_estimate']:.3f}")
+        _print_build_outcome(project, results)
+    finally:
+        project.close()
     if any(r["status"] == "failed" for r in results.values()):
         raise typer.Exit(1)
 
@@ -257,17 +351,31 @@ def update(
     materials: Annotated[Path | None, typer.Option(help="Point the repository at a new materials directory")] = None,
 ) -> None:
     """Bring the repository in sync with changed materials and report the impact."""
+    from terrakernel.runner import IngestError
     from terrakernel.update import format_report, run_update
 
     project = Project.open(repo)
     if materials:
+        materials = materials.resolve()
+        if not materials.is_dir():
+            raise typer.BadParameter(f"Materials directory does not exist: {materials}")
+        if materials == project.repo or materials in project.repo.parents:
+            raise typer.BadParameter("The output repository must be outside the materials directory.")
         cfg = project.config
-        cfg.materials = str(materials.resolve())
+        cfg.materials = str(materials)
         project.save_config(cfg)
     llm = _llm(project)
     project.add_listener(lambda e: console.print(f"[dim]{e['at'][11:19]}[/] [cyan]{e['stage']:<9}[/] {e['message']}")
                          if e["kind"] in ("item", "warning", "error") else None)
-    report = run_update(project, llm)
+    try:
+        report = run_update(project, llm)
+    except IngestError as exc:
+        _print_ingest_report(project)
+        console.print(f"Update stopped: {exc}", markup=False)
+        console.print(f"Fix the files, then retry: terrakernel update {shlex.quote(str(project.repo))}", markup=False)
+        raise typer.Exit(1) from exc
+    finally:
+        project.close()
     console.print(format_report(report))
     usage = llm.usage.as_dict()
     console.print(f"model calls: {usage['calls']} (+{usage['cached_responses']} cached), "

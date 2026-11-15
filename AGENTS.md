@@ -12,7 +12,7 @@
 - 静态检查：`uv run ruff check src examples tests`。
 - 离线测试（不调用模型）：`uv run pytest tests`。
 - 模型端点检查：`uv run terrakernel doctor`。
-- 端到端（会调用模型并产生费用，结果写入 `artifacts/YYYYMMDD/<任务>/`）：按 README 的资料导入流程执行 `init`、`build`、`validate`，核对产物使用；涉及资料更新时验证 `update`。对比实验需要时再执行 `eval`，普通导入不以评测为前置。
+- 端到端（会调用模型并产生费用，结果写入 `artifacts/YYYYMMDD/<任务>/`）：默认使用 `build <资料目录> --goal <目标> --output <生成目录>`，再核对 `validate` 与产物使用；原 `init` → `build <生成目录>` 流程继续兼容。涉及资料更新时验证 `update`；对比实验需要时再执行 `eval`，普通导入不以评测为前置。
 
 ## 约定
 
