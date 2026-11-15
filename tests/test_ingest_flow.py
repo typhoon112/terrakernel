@@ -1,13 +1,14 @@
 """Offline checks for user-visible imports and recoverable failures."""
 
 import json
+import threading
 from types import SimpleNamespace
 
 import pytest
 
 from terrakernel.llm.client import Usage
 from terrakernel.project import Project, ProjectConfig
-from terrakernel.runner import STAGE_FUNCS, IngestError, Pipeline, run_ingest
+from terrakernel.runner import STAGE_FUNCS, IngestError, Pipeline, run_extract, run_ingest
 
 
 def make_project(tmp_path):
@@ -42,6 +43,7 @@ def test_import_report_and_failed_retry_preserve_update_diff(tmp_path):
     broken.unlink()
     retried = run_ingest(project)
     assert retried["changed"] == first["changed"]
+    assert next(f for f in retried["files"] if f["path"] == "notes.txt")["reused_parse"] is True
     assert project.kb.get_meta("last_ingest_diff")[retried["changed"][0]]["changed"]
     assert run_ingest(project)["summary"]["unchanged"] == 1
     project.close()
@@ -68,3 +70,38 @@ def test_validation_failures_are_failed_pipeline_stages(tmp_path, monkeypatch):
     assert result["validate"]["status"] == "failed"
     assert result["validate"]["report"]["fail"] == 1
     assert project.load_state()["stages"]["validate"]["status"] == "failed"
+
+
+def test_parallel_extraction_keeps_successful_empty_sources_on_retry(tmp_path, monkeypatch):
+    project = make_project(tmp_path)
+    for name in ("a", "b", "c"):
+        (project.materials_dir / f"{name}.txt").write_text("A document cover with no knowledge objects.")
+    run_ingest(project)
+    calls = []
+    start_together = threading.Barrier(2)
+    failing = True
+
+    def extract(project, llm, source, **kwargs):
+        calls.append(source.path)
+        if failing and source.path in ("a.txt", "b.txt"):
+            start_together.wait(timeout=5)
+        if failing and source.path == "a.txt":
+            raise ValueError("temporary model failure")
+        project.kb.set_meta(f"processed:{source.id}", True)
+        return {"source": source.id, "objects": 0, "gaps": 0, "problems": []}
+
+    monkeypatch.setattr("terrakernel.extract.extract_source", extract)
+    llm = SimpleNamespace(settings=SimpleNamespace(max_concurrency=2))
+    with pytest.raises(RuntimeError, match="Completed sources were saved"):
+        run_extract(project, llm)
+    ids = {s.path: s.id for s in project.kb.sources()}
+    fingerprints = project.load_state()["extract_fingerprints"]
+    assert ids["a.txt"] not in fingerprints
+    assert ids["b.txt"] in fingerprints
+    failing = False
+    run_extract(project, llm)
+    assert calls.count("a.txt") == 2
+    assert calls.count("b.txt") == 1
+    assert calls.count("c.txt") == 1
+    assert run_extract(project, llm)["extracted_sources"] == []
+    project.close()

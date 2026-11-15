@@ -76,6 +76,9 @@ class SiteData:
         return [g for g in self.gaps if not g.resolved_by]
 
     def answered_gaps(self) -> list[Gap]:
+        return [g for g in self.gaps if (g.resolved_by or "").startswith("human:")]
+
+    def resolved_gaps(self) -> list[Gap]:
         return [g for g in self.gaps if g.resolved_by]
 
     def evidence_of(self, oid: str) -> list[tuple[EvidenceLink, Any]]:
@@ -147,6 +150,8 @@ class SiteData:
             "open_gaps": len(self.open_gaps()),
             "blocking_gaps": sum(g.severity.value == "blocking" for g in self.open_gaps()),
             "answered_gaps": len(self.answered_gaps()),
+            "resolved_gaps": len(self.resolved_gaps()),
+            "model_resolved_gaps": sum((g.resolved_by or "").startswith("reconcile:") for g in self.gaps),
             "needs_review": sum(o.status.value == "needs_review" for o in self.objects.values()),
             "human_confirmed": sum(o.basis.value == "human_confirmed" for o in self.objects.values()),
             "tools": len(tools),

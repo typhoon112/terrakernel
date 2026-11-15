@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from terrakernel.builtin import skill_body
+from terrakernel.compile.context import gap_context
 from terrakernel.llm.client import LLMClient
 from terrakernel.plan import RUNTIME_TOOLS
 from terrakernel.plan.spec import RepositoryPlan, SkillPlan
@@ -17,14 +18,14 @@ from terrakernel.project import Project
 from terrakernel.util import now_iso, write_text_stable
 
 RUNTIME_SIGNATURES = {
-    "list_datasets": "rt.list_datasets() -> list[str]",
+    "list_datasets": "rt.list_datasets() -> list[str]  # list configured dataset names",
     "dataset_info": "rt.dataset_info(name) -> dict  # file, columns, units, timestamp convention, open issues",
     "load_dataset": "rt.load_dataset(name) -> DataFrame  # UTC index in the canonical convention, canonical units",
     "load_series": "rt.load_series(name, column=None) -> Series  # one canonical column; see .attrs['terrakernel']",
     "load_array": "rt.load_array(name, variable) -> xarray.DataArray  # NetCDF variable in its canonical unit",
     "common_valid_sample": "rt.common_valid_sample(**series) -> DataFrame  # rows where every series is present",
     "parameter_series": "rt.parameter_series(name, index) -> Series  # documented time-varying parameter per row",
-    "convert_units": "rt.convert_units(values, from_unit, to_unit)",
+    "convert_units": "rt.convert_units(values, from_unit, to_unit)  # convert values between units of the same dimension",
 }
 SKILL_LINK_RE = re.compile(r"\]\(([^)]+)\)")
 
@@ -47,7 +48,17 @@ def skill_prompt(project: Project, skill: SkillPlan, plan: RepositoryPlan, entri
     docs = [f"- ../../../knowledge/{d.path}: {d.title} — {d.description}" for d in plan.docs if d.path in skill.docs]
     comps = [f"- ../../../{e['knowledge']}: how `{e['name']}` is defined and verified" for e in entries
              if e["name"] in usable and e["name"] in skill.tools]
-    gaps = [g for g in project.kb.gaps() if not g.resolved_by]
+    object_ids = {oid for doc in plan.docs if doc.path in skill.docs for oid in doc.object_ids}
+    for tool in plan.tools:
+        if tool.name in skill.tools:
+            object_ids.update(tool.method_ids + tool.test_object_ids)
+            if tool.capability_id:
+                object_ids.add(tool.capability_id)
+    task_text = f"{skill.name} {skill.description} {' '.join(skill.steps)}"
+    if task:
+        task_text += f" {task.title} {task.prompt} {' '.join(task.acceptance)}"
+    gaps = gap_context(project, object_ids, task_text)
+    docs.append("- ../../../knowledge/gaps.md: full register of open and resolved gaps")
     datasets = [f"- {d.name}: {d.file}; columns " + ", ".join(f"{c.column} [{c.unit}]" for c in d.value_columns)
                 for d in plan.datasets]
     params = [f"- {p.name} [{p.unit}], lookup at {p.lookup}" for p in plan.parameters]
@@ -58,7 +69,7 @@ def skill_prompt(project: Project, skill: SkillPlan, plan: RepositoryPlan, entri
              "Available functions (exact):\n" + "\n".join(f"- {t}" for t in tools),
              "Datasets:\n" + "\n".join(datasets), "Parameters:\n" + ("\n".join(params) or "- none"),
              "Knowledge documents (link with these paths):\n" + "\n".join(docs + comps),
-             "Open gaps:\n" + ("\n".join(f"- [{g.severity.value}] {g.description}" for g in gaps) or "- none"),
+             "Open gaps:\n" + gaps.text,
              "Planned tools that FAILED verification (do not use them; tell the agent to report this):\n"
              + ("\n".join(f"- {m}" for m in missing) or "- none")]
     if issues and previous:
@@ -144,7 +155,9 @@ def write_agents_md(project: Project, plan: RepositoryPlan, entries: list[dict[s
         f"# {cfg.name}", "",
         plan.summary, "",
         "This repository was compiled by TerraKernel from the materials in [`sources/`](sources/). "
-        "Knowledge is grounded in those materials; tools are tested against values quoted from them.", "",
+        "Knowledge is grounded in those materials. Tool status `verified` means tests against independent "
+        "reference values quoted from the materials passed; `tested` means generic checks passed without "
+        "an independent reference case. See each tool's status and tests.", "",
         "## Rules", "",
         "- Read [`knowledge/index.md`](knowledge/index.md) and the documents a skill lists before analysing data.",
         "- Load data only through `research_tools` (it applies the documented units, timestamp conventions and "
@@ -168,7 +181,7 @@ def write_agents_md(project: Project, plan: RepositoryPlan, entries: list[dict[s
     for name in RUNTIME_TOOLS:
         sig, _, purpose = RUNTIME_SIGNATURES[name].partition("#")
         call = sig.strip().split(" -> ")[0].replace("rt.", "")
-        lines.append(f"| `{call}` | {purpose.strip() or 'convert values between units of the same dimension'} | runtime |")
+        lines.append(f"| `{call}` | {purpose.strip()} | runtime |")
     for e in entries:
         doc = e.get("knowledge")
         status = e["status"]
@@ -200,15 +213,18 @@ def write_agents_md(project: Project, plan: RepositoryPlan, entries: list[dict[s
             lines.append(f"- {g.description} → {g.resolution} ({g.resolved_by}; recorded in "
                          "[sources/human_answers.md](sources/human_answers.md))")
     lines += ["", "## Open questions", ""]
-    if open_gaps:
-        for g in sorted(open_gaps, key=lambda x: x.severity.value)[:20]:
-            subject = kb.object(g.subject_id) if g.subject_id else None
-            about = f" ({subject.name}, {', '.join(subject.source_ids)})" if subject else ""
-            lines.append(f"- [{g.severity.value}]{about} {g.description}")
+    if plan.capability_gaps:
+        lines += ["The current plan identifies these capability limitations for the requested tasks:", ""]
+        for gap in plan.capability_gaps:
+            lines.append(f"- [{gap.severity}] {gap.description}")
     else:
-        lines.append("- None recorded.")
-    if blocking:
-        lines += ["", f"{len(blocking)} blocking question(s) remain: results that depend on them must say so."]
+        lines.append("- The current plan records no additional capability limitations.")
+    lines += ["", f"The full register contains {len(open_gaps)} open candidate reports "
+              f"({len(blocking)} originally labelled blocking) from limited extraction or reconciliation contexts. "
+              "These counts do not establish actual missing material or unavailable tools. "
+              "Cross-check the current knowledge and tool status before treating a report as a limitation."]
+    lines += ["", "All open and resolved questions: [gap register](knowledge/gaps.md) "
+              "and [complete data](knowledge/gaps.jsonl)."]
     lines += ["", "## Provenance", "",
               "- `.terrakernel/` holds the source knowledge base (`kb.sqlite`), the build plan (`spec.yaml`), "
               "dependency lineage and validation results. Rebuild or update with `terrakernel build` / "
@@ -233,14 +249,14 @@ def write_adapters(project: Project) -> None:
     write_text_stable(repo / "pyproject.toml", 
         f'[project]\nname = "{name}"\nversion = "0.1.0"\ndescription = "AI-native research repository compiled by '
         f'TerraKernel"\nrequires-python = ">=3.11"\ndependencies = ["pandas>=2.2", "numpy>=2", "pyyaml>=6", '
-        f'"openpyxl>=3.1", "pyarrow>=17", "xarray>=2024.6", "netcdf4>=1.7", "mcp>=2.3,<3"]\n\n[dependency-groups]\ndev = ["pytest>=8"]\n\n[tool.uv]\npackage = false\n\n'
+        f'"openpyxl>=3.1", "xlrd>=2", "pyarrow>=17", "xarray>=2024.6", "netcdf4>=1.7", "mcp>=2.3,<3"]\n\n[dependency-groups]\ndev = ["pytest>=8"]\n\n[tool.uv]\npackage = false\n\n'
         '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n')
     write_text_stable(repo / ".gitignore", "__pycache__/\n.venv/\n.pytest_cache/\n.terrakernel/llm-cache/\n")
 
 
 def write_registry(project: Project, plan: RepositoryPlan, entries: list[dict[str, Any]]) -> None:
     registry = {
-        "name": re.sub(r"[^a-z0-9_-]+", "-", project.config.name.lower()).strip("-"),
+        "name": re.sub(r"[^a-z0-9_-]+", "-", project.config.name.lower()).strip("-") or "research-tools",
         "instructions": (plan.summary[:480] + " Load data with list_datasets/dataset_info; every tool aligns its "
                          "dataset inputs on a common valid sample and uses the documented units."),
         "generated_at": now_iso(),

@@ -36,6 +36,7 @@ import yaml
 
 from terrakernel.compile.tools import python_env, run_pytest
 from terrakernel.llm.client import LLMClient
+from terrakernel.models import ObjectStatus
 from terrakernel.plan import RUNTIME_TOOLS, load_spec
 from terrakernel.project import Project
 from terrakernel.util import now_iso
@@ -248,12 +249,34 @@ def check_lineage(report: Report, project: Project) -> None:
         report.add("lineage", "lineage.json", "exists", False)
         return
     lineage = json.loads(project.lineage_path.read_text())
-    ids = {o.id for o in project.kb.objects()}
-    missing = sorted({oid for a in lineage["artifacts"].values() for oid in a.get("objects", [])} - ids)
+    objects = {o.id: o for o in project.kb.objects()}
+    used = {oid for a in lineage["artifacts"].values() for oid in a.get("objects", [])}
+    missing = sorted(used - objects.keys())
     report.add("lineage", "lineage.json", "artifact_objects_exist", not missing, f"missing: {missing[:5]}" if missing else "")
-    ungrounded = [oid for oid, o in lineage["objects"].items() if not o["evidence"] and not o.get("derived_from")]
+    inactive = sorted(oid for oid in used if oid in objects and objects[oid].status != ObjectStatus.active)
+    report.add("lineage", "lineage.json", "artifact_objects_active", not inactive,
+               f"artifacts use objects awaiting review or superseded: {inactive[:5]}" if inactive else "")
+    graph = lineage["objects"]
+    evidence_ids = set(lineage.get("evidence", {}))
+
+    def grounded(oid: str, visiting: frozenset[str] = frozenset()) -> bool:
+        if oid in visiting or oid not in objects or objects[oid].status != ObjectStatus.active:
+            return False
+        node = graph.get(oid, {})
+        if set(node.get("evidence", [])) & evidence_ids:
+            return True
+        members = node.get("derived_from", [])
+        return bool(members) and all(grounded(member, visiting | {oid}) for member in members)
+
+    ungrounded = [oid for oid, o in objects.items() if o.status == ObjectStatus.active and not grounded(oid)]
     report.add("lineage", "lineage.json", "objects_grounded", not ungrounded,
-               f"objects without evidence: {ungrounded[:5]}" if ungrounded else "")
+               f"active objects without grounded evidence: {ungrounded[:5]}" if ungrounded else "")
+    review_missing = [oid for oid, o in objects.items() if o.status == ObjectStatus.needs_review
+                      and not (set(graph.get(oid, {}).get("evidence", [])) & evidence_ids)]
+    if review_missing:
+        report.warn("lineage", "lineage.json", "review_objects_ungrounded",
+                    f"{len(review_missing)} objects retained for review without accepted evidence; excluded from "
+                    f"usable artifacts: {review_missing[:5]}")
 
 
 def run_validate(project: Project, llm: LLMClient | None = None, force: bool = False, with_tasks: bool = False,

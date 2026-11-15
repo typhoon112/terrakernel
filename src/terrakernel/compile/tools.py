@@ -306,7 +306,7 @@ def render_test_file(tool: ToolPlan, cases: list[dict], properties: list[str]) -
         else:
             gen.append(f"        {i.name!r}: 'x',")
     gen += ["    }", "", ""]
-    if properties:
+    if properties or (series_inputs and (tool.output_kind == "series" or tool.missing_values == "reject")):
         lines += gen
     a, b = (series_inputs + [None, None])[:2]
     for prop in properties:
@@ -324,7 +324,6 @@ def render_test_file(tool: ToolPlan, cases: list[dict], properties: list[str]) -
                       "    y = {k: (v * 7.3 if not isinstance(v, str) else v) for k, v in x.items()}",
                       f"    assert {tool.name}(**x) == pytest.approx({tool.name}(**y), rel=1e-9)", "", ""]
     if tool.output_kind == "series" and a:
-        lines += gen if not properties else []
         lines += ["def test_returns_one_value_per_row():", "    x = _random_inputs(4, n=30)",
                   f"    out = {tool.name}(**x)", "    import pandas as pd",
                   "    assert isinstance(out, pd.Series)", f"    assert len(out) == len(x[{a!r}])", "", ""]
@@ -523,7 +522,7 @@ def render_candidate_module(tool: ToolPlan, code: str, project: Project) -> str:
     names = [kb.object(m).name for m in tool.method_ids if kb.object(m)]
     header = [f'"""{tool.purpose}', "",
               f"Strategy: candidate. Implemented by TerraKernel from the documented definition of: {', '.join(names)}.",
-              f"Verified against independent references from the materials: see tests/test_{tool.name}.py.",
+              f"Validation status and source references: see registry.json and tests/test_{tool.name}.py.",
               '"""', "", "from __future__ import annotations", "", "import math  # noqa: F401", "",
               "import numpy as np  # noqa: F401", "import pandas as pd  # noqa: F401", "",
               "from research_tools import _checks  # noqa: F401", "", ""]
@@ -564,9 +563,9 @@ def evaluate_cases(repo: Path, tool: ToolPlan, cases: list[dict]) -> list[str]:
 
 # ============================================================== orchestration
 def tool_inputs_fingerprint(project: Project, tool: ToolPlan) -> str:
-    """Fingerprint of everything a tool's implementation and tests depend on (semantics only)."""
+    """Fingerprint tool semantics and the compiler that renders implementations/tests."""
     kb = project.kb
-    parts = [tool.model_dump_json()]
+    parts = [tool.model_dump_json(), hashlib.sha256(Path(__file__).read_bytes()).hexdigest()]
     if tool.strategy == "candidate" and "int" in _return_contract(tool):
         parts.append("returns:int")
     for oid in sorted(set(tool.method_ids + tool.test_object_ids + ([tool.capability_id] if tool.capability_id else []))):

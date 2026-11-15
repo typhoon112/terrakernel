@@ -8,17 +8,60 @@
 
 from __future__ import annotations
 
+import atexit
 import hashlib
+from collections import OrderedDict
 from html import escape
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import pypdfium2 as pdfium
+from PIL import Image, ImageDraw
 
 RENDER_SCALE = 2.0
 CROP_MARGIN = 28
 MAX_CROP_WIDTH = 900
+MAX_CACHED_PDF_PAGES = 8
+_PDF_PAGE_CACHE: OrderedDict[tuple[str, int, int, float], Image.Image] = OrderedDict()
+
+
+@atexit.register
+def _clear_pdf_page_cache() -> None:
+    while _PDF_PAGE_CACHE:
+        _, image = _PDF_PAGE_CACHE.popitem(last=False)
+        image.close()
+
+
+def _pdf_page_image(source_path: Path, page: int, modified: int) -> Image.Image | None:
+    key = (str(source_path.resolve()), modified, page, RENDER_SCALE)
+    if key in _PDF_PAGE_CACHE:
+        _PDF_PAGE_CACHE.move_to_end(key)
+        return _PDF_PAGE_CACHE[key]
+    doc = pdfium.PdfDocument(str(source_path))
+    try:
+        if page < 1 or page > len(doc):
+            return None
+        pdf_page = doc[page - 1]
+        try:
+            bitmap = pdf_page.render(scale=RENDER_SCALE)
+            try:
+                rendered = bitmap.to_pil()
+                try:
+                    image = rendered.convert("RGB")  # independent pixels, safe after bitmap.close()
+                finally:
+                    rendered.close()
+            finally:
+                bitmap.close()
+        finally:
+            pdf_page.close()
+    finally:
+        doc.close()
+    _PDF_PAGE_CACHE[key] = image
+    while len(_PDF_PAGE_CACHE) > MAX_CACHED_PDF_PAGES:
+        _, evicted = _PDF_PAGE_CACHE.popitem(last=False)
+        evicted.close()
+    return image
 
 
 def _cache_path(assets_dir: Path, key: str) -> Path:
@@ -29,36 +72,41 @@ def pdf_region(project_repo: Path, source_path: Path, page: int, bbox: list[floa
     """Crop a PDF page around ``bbox`` and return the site-relative asset path."""
     if not page:
         return None
-    key = f"{source_path}:{source_path.stat().st_mtime_ns}:{page}:{bbox}"
+    modified = source_path.stat().st_mtime_ns
+    key = f"{source_path}:{modified}:{page}:{bbox}"
     out = _cache_path(assets_dir, key)
     site_rel = (out.relative_to(assets_dir) if out.is_relative_to(assets_dir) else out).as_posix()
     if out.exists():
         return site_rel
-    doc = pdfium.PdfDocument(str(source_path))
+    page_image = _pdf_page_image(source_path, page, modified)
+    if page_image is None:
+        return None
+    img = page_image.copy()  # highlighting one evidence region must not contaminate the cached page.
+    crop = None
     try:
-        if page < 1 or page > len(doc):
-            return None
-        img = doc[page - 1].render(scale=RENDER_SCALE).to_pil().convert("RGB")
+        draw = ImageDraw.Draw(img)
+        if bbox:
+            x0, top, x1, bottom = [v * RENDER_SCALE for v in bbox]
+            left = max(0, x0 - CROP_MARGIN)
+            right = min(img.width, x1 + CROP_MARGIN)
+            up = max(0, top - CROP_MARGIN)
+            down = min(img.height, bottom + CROP_MARGIN)
+            draw.rectangle([x0 - 2, top - 2, x1 + 2, bottom + 2], outline=(200, 135, 59), width=3)
+            crop = img.crop((int(left), int(up), int(right), int(down)))
+        else:
+            crop = img
+        if crop.width > MAX_CROP_WIDTH:
+            ratio = MAX_CROP_WIDTH / crop.width
+            resized = crop.resize((MAX_CROP_WIDTH, int(crop.height * ratio)))
+            if crop is not img:
+                crop.close()
+            crop = resized
+        out.parent.mkdir(parents=True, exist_ok=True)
+        crop.save(out)
     finally:
-        doc.close()
-    from PIL import ImageDraw
-
-    draw = ImageDraw.Draw(img)
-    if bbox:
-        x0, top, x1, bottom = [v * RENDER_SCALE for v in bbox]
-        left = max(0, x0 - CROP_MARGIN)
-        right = min(img.width, x1 + CROP_MARGIN)
-        up = max(0, top - CROP_MARGIN)
-        down = min(img.height, bottom + CROP_MARGIN)
-        draw.rectangle([x0 - 2, top - 2, x1 + 2, bottom + 2], outline=(200, 135, 59), width=3)
-        crop = img.crop((int(left), int(up), int(right), int(down)))
-    else:
-        crop = img
-    if crop.width > MAX_CROP_WIDTH:
-        ratio = MAX_CROP_WIDTH / crop.width
-        crop = crop.resize((MAX_CROP_WIDTH, int(crop.height * ratio)))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    crop.save(out, optimize=True)
+        if crop is not None and crop is not img:
+            crop.close()
+        img.close()
     return site_rel
 
 

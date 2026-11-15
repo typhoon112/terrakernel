@@ -39,7 +39,7 @@ def build_lineage(project: Project, spec: RepositorySpec) -> dict[str, Any]:
     for o in kb.objects():
         derived_from = sorted(set(o.attributes.get("members", []))) if o.produced_by.endswith("+reconcile") else []
         objects[o.id] = {"evidence": sorted(set(links.get(o.id, []))), "derived_from": derived_from,
-                         "fingerprint": fps[o.id], "sources": o.source_ids}
+                         "fingerprint": fps[o.id], "sources": o.source_ids, "status": o.status.value}
     artifacts = {}
     for a in spec.artifacts:
         artifacts[a.id] = {"path": a.path, "kind": a.kind, "objects": a.objects, "depends_on": a.depends_on,

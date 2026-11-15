@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
-from html import escape
+from html import escape, unescape
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from terrakernel.site import assets as A
 from terrakernel.site import charts
 from terrakernel.site.i18n import bi, tw
 from terrakernel.site.model import SiteData
 from terrakernel.site.render import md_to_html, split_frontmatter
+from terrakernel.util import short_hash
 
 TYPE_LABEL = {
     "concept": "concept", "claim": "claim", "method": "method", "dataset": "dataset", "constraint": "constraint",
@@ -60,16 +62,40 @@ LANG_SCRIPT = """
       next();
     });
   });
-  document.querySelectorAll(".chip[data-filter]").forEach(function (chip) {
-    chip.addEventListener("click", function () {
-      var f = chip.getAttribute("data-filter");
-      document.querySelectorAll(".chip[data-filter]").forEach(function (c) { c.classList.toggle("on", c === chip); });
-      document.querySelectorAll("[data-kinds]").forEach(function (card) {
+  var caseList = document.getElementById("case-list");
+  if (caseList) {
+    var cards = Array.from(caseList.querySelectorAll("[data-kinds]"));
+    var search = document.getElementById("case-search");
+    var more = document.getElementById("case-more");
+    var filter = "all", limit = 24;
+    function renderCases() {
+      var query = search.value.trim().toLocaleLowerCase();
+      var matches = 0, visible = 0;
+      cards.forEach(function (card) {
         var kinds = card.getAttribute("data-kinds").split(" ");
-        card.style.display = (f === "all" || kinds.indexOf(f) >= 0) ? "" : "none";
+        var match = (filter === "all" || kinds.indexOf(filter) >= 0) &&
+          card.getAttribute("data-search").toLocaleLowerCase().indexOf(query) >= 0;
+        card.hidden = !match || matches >= limit;
+        if (match) matches += 1;
+        if (!card.hidden) visible += 1;
+      });
+      document.getElementById("case-visible").textContent = visible;
+      document.getElementById("case-total").textContent = matches;
+      document.getElementById("case-empty").hidden = matches !== 0;
+      more.hidden = visible >= matches;
+    }
+    document.querySelectorAll(".chip[data-filter]").forEach(function (chip) {
+      chip.addEventListener("click", function () {
+        filter = chip.getAttribute("data-filter");
+        document.querySelectorAll(".chip[data-filter]").forEach(function (c) { c.classList.toggle("on", c === chip); });
+        limit = 24;
+        renderCases();
       });
     });
-  });
+    search.addEventListener("input", function () { limit = 24; renderCases(); });
+    more.addEventListener("click", function () { limit += 24; renderCases(); });
+    renderCases();
+  }
 })();
 </script>
 """
@@ -178,7 +204,7 @@ def hero_flow(data: SiteData) -> str:
     rows = [
         ("materials", f'{c["sources"]} files in <code>sources/</code>', f'{c["evidence"]} evidence'),
         ("evidence", "pages, lines, columns, functions", f'{c["objects"]} objects'),
-        ("knowledge", f'{c["conflicts"]} conflicts · {c["answered_gaps"]} answered · {c["open_gaps"]} open',
+        ("knowledge", f'{c["conflicts"]} conflicts · {c["resolved_gaps"]} resolved · {c["open_gaps"]} open',
          f'{c["docs"] + c["computations"]} docs'),
         ("tools", f'{c["verified_tools"]} verified · {c["tested_tools"]} property-tested · {c["failed_tools"]} withheld',
          f'{len(tools)} tools'),
@@ -262,16 +288,23 @@ def build_cases(data: SiteData) -> list[dict[str, Any]]:
                 {a.id for a in data.artifacts_using(oids[0])} if oids else []),
             "runs": run_summary(set(oids), set()), "source_ids": [s for s in [x["source"].id if x["source"] else None for x in ev_items(oids)] if s],
         })
-    # answered by people
-    for i, g in enumerate(data.answered_gaps()):
+    # Keep human answers distinct from resolutions proposed across sources by the model.
+    for i, g in enumerate(data.resolved_gaps()):
+        human = (g.resolved_by or "").startswith("human:")
+        model = (g.resolved_by or "").startswith("reconcile:")
         answer_objs = [o for o in data.objects.values() if o.attributes.get("answers_gap") == g.id]
-        oids = ([g.subject_id] if g.subject_id else []) + [o.id for o in answer_objs]
+        resolver_ids = [oid for oid in g.resolved_by.removeprefix("reconcile:").split(",") if obj(oid)] if model else []
+        oids = list(dict.fromkeys(([g.subject_id] if g.subject_id else []) + [o.id for o in answer_objs] + resolver_ids))
+        label = "Answered by a person" if human else "Resolved by model reconciliation" if model else "Resolved"
+        evidence = ev_items(oids)
         cases.append({
-            "id": f"answered-{i+1}", "kinds": ["answered"], "title": (name(g.subject_id) + ": " if g.subject_id else "") + g.resolution[:110],
-            "lede": f"{g.description} — {g.resolution} ({g.resolved_by})",
-            "evidence": ev_items([o.id for o in answer_objs] + oids), "objects": oids, "relations": [],
+            "id": f"answered-{i+1}", "kinds": ["resolved", "human" if human else "model" if model else "other"],
+            "title": (name(g.subject_id) + ": " if g.subject_id else "") + (g.resolution or "")[:110],
+            "lede": f"{label}: {g.description} — {g.resolution or ''} ({g.resolved_by})",
+            "evidence": evidence, "objects": oids, "relations": [],
             "artifacts": sorted({a.id for oid in oids for a in data.artifacts_using(oid)}),
-            "runs": run_summary(set(oids), set()), "source_ids": ["human_answers"],
+            "runs": run_summary(set(oids), set()),
+            "source_ids": sorted({e["source"].id for e in evidence if e["source"]}),
         })
     # tools
     for t in data.tools():
@@ -279,7 +312,7 @@ def build_cases(data: SiteData) -> list[dict[str, Any]]:
             continue
         oids = list(t.get("objects") or [])
         cases.append({
-            "id": f"tool-{t['name']}", "kinds": ["tool", "failed" if t.get("status") == "failed" else "verified"],
+            "id": f"tool-{t['name']}", "kinds": ["tool", t["status"]],
             "title": f"{t['name']} · {t.get('status')}",
             "lede": t.get("description", ""),
             "evidence": ev_items(oids, limit=4), "objects": oids, "relations": [],
@@ -370,7 +403,8 @@ def object_block(data: SiteData, oid: str, depth: int = 0) -> str:
 def _slug(text: str) -> str:
     import re
 
-    return re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-").lower()[:80]
+    readable = re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-").lower()[:64].rstrip("-") or "item"
+    return f"{readable}-{short_hash(text, 12)}"
 
 
 def artifact_block(data: SiteData, aid: str, depth: int = 0) -> str:
@@ -455,20 +489,44 @@ def case_page(data: SiteData, case: dict[str, Any], site_dir: Path) -> str:
 
 
 # ----------------------------------------------------------------------------- index
+def _task_entries(data: SiteData) -> str:
+    tasks = data.project.config.tasks
+    if not tasks:
+        return ""
+    plan = getattr(data.spec, "plan", None)
+    skills = plan.skills if plan else []
+    artifacts = {a.id: a for a in data.spec.artifacts if a.kind == "skill"}
+    cards = []
+    for number, task in enumerate(tasks, 1):
+        links = []
+        for skill in skills:
+            artifact = artifacts.get(f"skill:{skill.name}")
+            if skill.task_id == task.id and artifact and (data.project.repo / artifact.path).is_file():
+                links.append(f'<a class="btn ghost" href="files/{_slug(artifact.path)}.html">'
+                             f'{tw("tasks.open")}</a>')
+        actions = "".join(links) or f'<span class="small">{tw("tasks.pending")}</span>'
+        cards.append(f'<article class="task-card" data-task="{escape(task.id)}"><div class="small">{number:02d}</div>'
+                     f'<h3>{escape(task.title)}</h3><p>{escape(task.prompt)}</p><div class="task-actions">{actions}</div></article>')
+    return (f'<section class="block" id="tasks"><div class="wrap"><div class="head"><h2>{tw("tasks.title")}</h2>'
+            f'<div class="intro">{tw("tasks.intro")}</div></div><div class="task-grid">{"".join(cards)}</div></div></section>')
+
+
 def index_page(data: SiteData, cases: list[dict[str, Any]], site_dir: Path) -> str:
     c = data.counts()
     kinds_present = sorted({k for case in cases for k in case["kinds"] if k in
-                            ("conflict", "gap", "answered", "tool", "update")})
+                            ("conflict", "gap", "resolved", "tool", "update")})
     chips = [f'<button class="chip on" data-filter="all">{tw("cases.all")}<span class="c">{len(cases)}</span></button>']
     for k in kinds_present:
         n = sum(k in case["kinds"] for case in cases)
-        chips.append(f'<button class="chip" data-filter="{k}"><span class="i18n" data-en="{k}" data-zh="{ {"conflict":"冲突","gap":"待确认","answered":"人工回答","tool":"工具","update":"更新"}[k] }">{k}</span><span class="c">{n}</span></button>')
+        chips.append(f'<button class="chip" data-filter="{k}"><span class="i18n" data-en="{k}" data-zh="{ {"conflict":"冲突","gap":"待确认","resolved":"已解决","tool":"工具","update":"更新"}[k] }">{k}</span><span class="c">{n}</span></button>')
     card_html = []
-    for case in cases:
+    for index, case in enumerate(cases):
         tags = "".join(f'<span class="tag {escape(k)}">{escape(k)}</span>' for k in case["kinds"])
         srcs = ", ".join(sorted({(data.source_of(s) or type("x", (), {"path": s})).path for s in case.get("source_ids", [])}))[:90]
         card_html.append(
-            f'<a class="case" data-kinds="{" ".join(case["kinds"])}" href="cases/{case["id"]}.html">'
+            f'<a class="case" data-kinds="{" ".join(case["kinds"])}" '
+            f'data-search="{escape(case["title"] + " " + case["lede"] + " " + srcs)}" '
+            f'href="cases/{case["id"]}.html"{" hidden" if index >= 24 else ""}>'
             f'<div class="tags">{tags}</div><h3>{escape(case["title"])}</h3>'
             f'<p>{escape(case["lede"][:240])}</p><div class="from">{escape(srcs)}</div></a>')
 
@@ -483,13 +541,16 @@ def index_page(data: SiteData, cases: list[dict[str, Any]], site_dir: Path) -> s
         for i, e in enumerate(last_build))
     steps = "".join(f'<div class="step"><div class="t">{tw(f"steps.{i}.t")}</div><div class="d">{tw(f"steps.{i}.d")}</div></div>'
                     for i in range(1, 5))
+    task_entries = _task_entries(data)
+    start_href = "#tasks" if task_entries else "#cases"
+    start_label = "hero.tasks" if task_entries else "hero.goto"
     body = f"""
 <main>
 <section class="hero"><div class="wrap"><div class="grid">
 <div><div class="kicker">{tw("hero.kicker")} · {bi(data.name, data.site_config.get("title_zh"))}</div>
 <h1>{bi(hero_h1, data.site_config.get("hero_title_zh"))}</h1>
 <p class="lede">{tw("hero.lede")}</p>
-<div class="cta"><a class="btn" href="#cases">{tw("hero.goto")}</a>
+<div class="cta"><a class="btn" href="{start_href}">{tw(start_label)}</a>
 <a class="btn ghost" href="repo.html">{tw("hero.repo")}</a></div></div>
 <div><p class="goal">{escape(data.goal)}</p>{hero_flow(data)}</div>
 </div></div></section>
@@ -500,10 +561,19 @@ def index_page(data: SiteData, cases: list[dict[str, Any]], site_dir: Path) -> s
 <span class="small">{tw("nav.steps")} · {escape(str(len(last_build)))} events</span></div>
 <div class="steps" id="build-replay">{replay}</div></div>
 </div></section>
+{task_entries}
 <section class="block" id="cases"><div class="wrap"><div class="head"><h2>{tw("cases.title")}</h2>
 <div class="intro">{tw("cases.intro")}</div></div>
+<div class="case-controls"><label for="case-search">{tw("cases.search")}</label>
+<input id="case-search" type="search" autocomplete="off" aria-controls="case-list">
+<span class="small" role="status" aria-live="polite"><span id="case-visible">{min(24, len(cases))}</span> /
+<span id="case-total">{len(cases)}</span> {tw("cases.shown")}</span></div>
 <div class="filters">{"".join(chips)}</div>
-<div class="cases">{"".join(card_html)}</div></div></section>
+<div class="cases" id="case-list">{"".join(card_html)}</div>
+<p id="case-empty" class="small"{" hidden" if cases else ""}>{tw("cases.empty")}</p>
+<button class="btn ghost case-more" id="case-more" type="button" aria-controls="case-list"{" hidden" if len(cases) <= 24 else ""}>{tw("cases.more")}</button>
+<noscript><style>#case-list .case[hidden] {{ display:block !important; }}</style></noscript>
+</div></section>
 </main>"""
     return layout(data, data.name, body, active="overview", description=data.goal[:200])
 
@@ -517,7 +587,8 @@ def repo_page(data: SiteData) -> str:
     rows = []
     for kind in ("config", "runtime", "tool", "test", "computation_doc", "knowledge_doc", "skill", "entry", "adapter", "source"):
         for a in kinds.get(kind, []):
-            rows.append(f'<tr><td class="mono"><a href="files/{_slug(a.path)}.html">{escape(a.path)}</a></td>'
+            href = "download/repo.zip" if a.kind == "source" else f"files/{_slug(a.path)}.html"
+            rows.append(f'<tr><td class="mono"><a href="{href}">{escape(a.path)}</a></td>'
                         f'<td>{escape(kind)}</td><td>{_badge(a.status, a.status)}</td>'
                         f'<td class="mono small">{len(a.objects)}</td>'
                         f'<td class="small">{escape(", ".join(a.depends_on[:3]))}{"…" if len(a.depends_on) > 3 else ""}</td></tr>')
@@ -538,7 +609,7 @@ def repo_page(data: SiteData) -> str:
 <main><div class="wrap" style="padding-top:46px"><h1 style="font-size:2.4rem">{tw("repo.title")}</h1>
 <p class="lede" style="max-width:64ch">{tw("repo.intro")}</p>
 <p><a class="btn" href="download/repo.zip">{tw("repo.download")}</a>
-<a class="btn ghost" href="files/agents-md.html">AGENTS.md</a></p></div>
+<a class="btn ghost" href="files/{_slug('AGENTS.md')}.html">AGENTS.md</a></p></div>
 <section class="block"><div class="wrap"><h2>{tw("repo.artifacts")}</h2>
 <table><thead><tr><th>{tw("repo.file")}</th><th>{tw("repo.kind")}</th><th>{tw("repo.status")}</th>
 <th>{tw("repo.objects")}</th><th>{tw("repo.depends")}</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div></section>
@@ -599,29 +670,32 @@ def limits_page(data: SiteData) -> str:
         else:
             sources.append(f'<li><code>{escape(s.path)}</code> — {escape(s.kind.value)}, {s.size:,} bytes, '
                            f'sha256 {escape(s.sha256[:12])}…</li>')
-    answered = data.answered_gaps()
+    answered = data.resolved_gaps()
     answered_html = "".join(f"<li>{escape(g.description)} → <em>{escape(g.resolution or '')}</em> "
+                            + (tw("case.human") if (g.resolved_by or "").startswith("human:") else
+                               tw("case.model") if (g.resolved_by or "").startswith("reconcile:") else tw("case.resolved"))
+                            + " "
                             f"({escape(g.resolved_by or '')})</li>" for g in answered) or "<li>—</li>"
     body = f"""
 <main><div class="wrap" style="padding-top:46px"><h1 style="font-size:2.4rem">{tw("limits.title")}</h1></div>
 <section class="block"><div class="wrap"><div class="repo-grid">
 <div><h2>{tw("limits.claims")}</h2><ul>
-<li>Every knowledge object cites evidence in the materials with a verbatim quote, checked by matching the quote against the cited unit.</li>
+<li>Knowledge records show source quotations, derived relationships and review status. Quotation matches do not by themselves validate interpretation.</li>
 <li>Conflicts are kept as separate definitions; {c["conflicts"]} conflict(s) are recorded and none was merged away.</li>
-<li>{c["gaps"]} questions the materials leave open were recorded ({c["answered_gaps"]} answered by people); no default was invented for the rest.</li>
+<li>{c["gaps"]} questions were recorded: {c["resolved_gaps"]} resolved, including {c["answered_gaps"]} answered by people and {c["model_resolved_gaps"]} resolved by model reconciliation; {c["open_gaps"]} remain open.</li>
 <li>{c["verified_tools"]} tool(s) verified against values quoted from the materials, {c["tested_tools"]} tested for properties only, {c["failed_tools"]} failed and are withheld from agents.</li>
 <li>The generated repository passes {c["checks_pass"]} structural checks ({c["checks_fail"]} failed).</li>
 </ul></div>
 <div><h2>{tw("limits.nonclaims")}</h2><ul>
 <li>Passing structural checks does not mean the research conclusions are correct; it means the repository is well-formed, traceable and its tools pass their tests.</li>
-<li>Quotes are checked for presence in the evidence, not for interpreting it correctly; interpretation is reviewed only by the human answers shown below.</li>
+<li>Model reconciliation is recorded separately from human answers. A model-resolved question is not a human confirmation.</li>
 <li>Values measured from data (profiles, statistics) describe the files as delivered; they say nothing about the validity of the measurements.</li>
-<li>The demo materials are synthetically generated for testing and are labelled as such in their own text.</li>
+<li>The source inventory identifies the supplied materials. Follow each object's quotations and source locations to review the evidence for its claims.</li>
 </ul></div></div></div></section>
 <section class="block"><div class="wrap"><h2>{tw("limits.units_t")}</h2>
 <table><thead><tr><th>Tool</th><th>Status</th><th>Reference cases</th><th>Notes</th></tr></thead>
 <tbody>{"".join(tool_lines)}</tbody></table></div></section>
-<section class="block"><div class="wrap"><h2>Answered by people</h2><ul>{answered_html}</ul></div></section>
+<section class="block"><div class="wrap"><h2>{tw("case.resolved")}</h2><ul>{answered_html}</ul></div></section>
 <section class="block"><div class="wrap"><h2>{tw("limits.sources")}</h2><ul>{"".join(sources)}</ul>
 <p class="small">Interface fonts: IBM Plex, SIL Open Font License 1.1 (self-hosted, <code>static/fonts/IBM-Plex-LICENSE.txt</code>).</p>
 </div></section></main>"""
@@ -629,6 +703,33 @@ def limits_page(data: SiteData) -> str:
 
 
 # ----------------------------------------------------------------------------- knowledge docs / objects / files / runs
+def _document_link(data: SiteData, original: str, target: str) -> str:
+    """Resolve repository Markdown paths to their exported site page or bundle."""
+    parsed = urlsplit(unescape(target))
+    if parsed.scheme or parsed.netloc or not parsed.path:
+        return target
+    root = data.project.repo.resolve()
+    resolved = (root / original).parent / unquote(parsed.path)
+    try:
+        rel = resolved.resolve().relative_to(root).as_posix()
+    except ValueError:
+        return target
+    if rel in {"knowledge/catalog.jsonl", "knowledge/gaps.jsonl"}:
+        destination = f"../{Path(rel).name}"
+    elif rel in data.kdocs:
+        destination = f"../docs/{_slug(rel)}.html"
+    elif any(a.path == rel and a.kind != "source" for a in data.spec.artifacts) and resolved.is_file():
+        destination = f"../files/{_slug(rel)}.html"
+    elif resolved.exists():
+        # Original files and directory entries are included in the portable bundle.
+        return "../download/repo.zip"
+    else:
+        return target
+    if parsed.fragment:
+        destination += "#" + parsed.fragment
+    return escape(destination, quote=True)
+
+
 def doc_page(data: SiteData, doc: dict[str, Any]) -> str:
     fm = doc["frontmatter"]
     oids = doc.get("objects") or []
@@ -639,7 +740,8 @@ def doc_page(data: SiteData, doc: dict[str, Any]) -> str:
     def href(label: str) -> str | None:
         return oid_to_page.get(key_to_oid.get(label, label))
 
-    html = md_to_html(doc["body"], object_href=href, base_href="../")
+    html = md_to_html(doc["body"], object_href=href,
+                      link_href=lambda target: _document_link(data, doc["path"], target))
     aside = [f'<h3>{tw("kdoc.objects")}</h3>']
     for oid in oids:
         o = data.object(oid)
@@ -663,7 +765,7 @@ def doc_page(data: SiteData, doc: dict[str, Any]) -> str:
 
 
 def object_page(data: SiteData, oid: str, site_dir: Path) -> str:
-    blocks = [object_block(data, oid)]
+    blocks = [object_block(data, oid, depth=1)]
     evs = data.evidence_of(oid)
     rels = data.relations_of(oid)
     rel_html = "".join(
@@ -694,7 +796,7 @@ def file_page(data: SiteData, path: str) -> str:
     if f.suffix == ".md":
         text = f.read_text(encoding="utf-8")
         fm, body_md = split_frontmatter(text)
-        content = md_to_html(body_md, base_href="../")
+        content = md_to_html(body_md, link_href=lambda target: _document_link(data, path, target))
         if fm:
             content = '<table class="kv">' + "".join(
                 f"<tr><th>{escape(k)}</th><td>{escape(str(v)[:500])}</td></tr>" for k, v in fm.items()) + "</table>" + content

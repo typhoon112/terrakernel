@@ -14,6 +14,9 @@ EXT_KIND: dict[str, SourceKind] = {
     ".md": SourceKind.markdown,
     ".markdown": SourceKind.markdown,
     ".txt": SourceKind.text,
+    ".docx": SourceKind.text,
+    ".html": SourceKind.text,
+    ".htm": SourceKind.text,
     ".rst": SourceKind.text,
     ".json": SourceKind.text,
     ".yaml": SourceKind.text,
@@ -21,6 +24,7 @@ EXT_KIND: dict[str, SourceKind] = {
     ".csv": SourceKind.table,
     ".tsv": SourceKind.table,
     ".xlsx": SourceKind.table,
+    ".xls": SourceKind.table,
     ".xlsm": SourceKind.table,
     ".parquet": SourceKind.table,
     ".nc": SourceKind.array,
@@ -81,7 +85,7 @@ def scan_materials(materials_dir: Path) -> tuple[list[Source], list[str]]:
 
 def ingest_file(source: Source, path: Path, assets_dir: Path) -> list[Evidence]:
     """Parse one file into evidence units."""
-    from terrakernel.ingest import code, image, markdown, netcdf, pdf, table, text
+    from terrakernel.ingest import code, docx, html, image, markdown, netcdf, pdf, table, text
 
     handlers: dict[SourceKind, Callable[..., list[Evidence]]] = {
         SourceKind.pdf: pdf.ingest_pdf,
@@ -92,7 +96,8 @@ def ingest_file(source: Source, path: Path, assets_dir: Path) -> list[Evidence]:
         SourceKind.code: code.ingest_code,
         SourceKind.image: image.ingest_image,
     }
-    handler = handlers.get(source.kind)
+    suffix_handlers = {".docx": docx.ingest_docx, ".html": html.ingest_html, ".htm": html.ingest_html}
+    handler = suffix_handlers.get(path.suffix.lower()) or handlers.get(source.kind)
     if handler is None:
         return []
     items = handler(source, path, assets_dir)

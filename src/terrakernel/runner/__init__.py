@@ -9,16 +9,19 @@ changed.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import traceback
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any
 
 from terrakernel.builtin import skill_version
 from terrakernel.ingest import ingest_file, scan_materials
 from terrakernel.llm.client import LLMClient
-from terrakernel.models import Source, SourceKind
+from terrakernel.models import Evidence, Source, SourceKind
 from terrakernel.project import HUMAN_SOURCE_FILE, HUMAN_SOURCE_ID, Project
 from terrakernel.util import now_iso, sha256_file
 
@@ -74,24 +77,58 @@ def run_ingest(project: Project, llm: LLMClient | None = None, **_: Any) -> dict
     diff: dict[str, dict[str, list[str]]] = {}
     changed: list[str] = []
     parsed = []
+    from terrakernel import ingest
+
+    parser_dir = Path(ingest.__file__).parent
+    parser_files = sorted(parser_dir.rglob("*.py")) + [parser_dir.parent / "models.py"]
+    parser_fingerprint = hashlib.sha256("\n".join(sha256_file(p) for p in parser_files).encode()).hexdigest()
+    parser_unchanged = kb.get_meta("ingest_parser_fingerprint") == parser_fingerprint
+    cache_dir = project.state / "ingest-cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
     for s in sources:
         old = existing.get(s.id)
         old_ev = {e.id: e.content_hash for e in kb.evidence(s.id)} if old else {}
-        if old and old.sha256 == s.sha256 and old_ev:
+        if old and old.sha256 == s.sha256 and old_ev and parser_unchanged:
             files.append({"path": s.path, "kind": s.kind.value, "status": "unchanged", "evidence": len(old_ev)})
+            save_report("running")
             continue
         project.emit("ingest", "progress", f"parsing {s.path}")
         try:
-            evs = ingest_file(s, project.source_file(s), project.assets_dir)
+            cache_path = cache_dir / f"{s.id}-{s.sha256}-{parser_fingerprint}.json"
+            evs = []
+            reused_parse = False
+            if cache_path.exists():
+                try:
+                    cached = json.loads(cache_path.read_text())
+                    evs = [Evidence.model_validate(e) for e in cached["evidence"]]
+                    reused_parse = bool(evs) and all(e.source_id == s.id and
+                        (not e.asset or sha256_file(project.assets_dir / e.asset) == cached["assets"].get(e.asset))
+                        for e in evs)
+                    if reused_parse:
+                        s.meta.update(cached.get("source_meta", {}))
+                except (OSError, ValueError, TypeError, KeyError):
+                    pass  # An incomplete cache is reparsed from the original.
+            if not reused_parse:
+                evs = ingest_file(s, project.source_file(s), project.assets_dir)
             if not evs:
                 raise ValueError("No extractable evidence; check that the file contains readable material")
+            if not reused_parse:
+                tmp_cache = cache_path.with_suffix(".tmp")
+                tmp_cache.write_text(json.dumps({
+                    "evidence": [e.model_dump(mode="json") for e in evs],
+                    "assets": {e.asset: sha256_file(project.assets_dir / e.asset) for e in evs if e.asset},
+                    "source_meta": s.meta,
+                }, ensure_ascii=False))
+                tmp_cache.replace(cache_path)
         except Exception as e:
             reason = f"{type(e).__name__}: {e}"
             files.append({"path": s.path, "kind": s.kind.value, "status": "failed", "reason": reason})
             project.emit("ingest", "warning", f"{s.path}: {reason}", source=s.id)
+            save_report("running")
             continue
         parsed.append((s, evs))
-        files.append({"path": s.path, "kind": s.kind.value, "status": "parsed", "evidence": len(evs)})
+        files.append({"path": s.path, "kind": s.kind.value, "status": "parsed", "evidence": len(evs),
+                      "reused_parse": reused_parse})
         new_ev = {e.id: e.content_hash for e in evs}
         diff[s.id] = {
             "added": sorted(set(new_ev) - set(old_ev)),
@@ -101,6 +138,7 @@ def run_ingest(project: Project, llm: LLMClient | None = None, **_: Any) -> dict
         }
         changed.append(s.id)
         project.emit("ingest", "item", f"{s.path}: {len(evs)} evidence units", source=s.id, evidence=len(evs))
+        save_report("running")
     failed = [f["path"] for f in files if f["status"] == "failed"]
     if failed:
         fail(f"Could not parse {len(failed)} file(s): {', '.join(failed)}. "
@@ -116,6 +154,7 @@ def run_ingest(project: Project, llm: LLMClient | None = None, **_: Any) -> dict
         kb.delete_source(sid)
         diff[sid] = {"added": [], "removed": ["*"], "changed": [], "new_source": []}
     kb.set_meta("last_ingest_diff", diff)
+    kb.set_meta("ingest_parser_fingerprint", parser_fingerprint)
     stats = kb.stats()
     report.update(changed=changed, removed=removed, evidence=stats["evidence"],
                   evidence_by_kind=stats["evidence_by_kind"])
@@ -133,24 +172,58 @@ def run_extract(project: Project, llm: LLMClient, force: bool = False, **_: Any)
     state = project.load_state()
     fps: dict[str, str] = state.setdefault("extract_fingerprints", {})
     version = skill_version("extract-knowledge")
+    extraction_version = f"{version}:{model}:{kb.get_meta('ingest_parser_fingerprint', '')}"
     reports = []
-    for s in kb.sources():
-        fp = f"{s.sha256}:{version}:{model}"
-        has_objects = any(s.id in o.source_ids for o in kb.objects())
-        if not force and fps.get(s.id) == fp and (has_objects or s.kind.value == "image"):
-            continue
-        project.emit("extract", "progress", f"extracting knowledge from {s.path}", source=s.id)
-        rep = extract_source(project, llm, s, model=model)
-        reports.append(rep)
-        fps[s.id] = fp
-        state = project.load_state() | {"extract_fingerprints": fps}
-        project.save_state(state)
-        project.emit("extract", "item", f"{s.path}: {rep['objects']} objects, {rep['gaps']} gaps", **rep)
-        for p in rep.get("problems", [])[:10]:
-            project.emit("extract", "warning", p, source=s.id)
-    for sid in [k for k in fps if k not in {s.id for s in kb.sources()}]:
+    sources = kb.sources()
+    pending_sources = iter(s for s in sources
+        # A successfully processed notice or cover may produce no objects.
+        # Its saved fingerprint is still a completed extraction checkpoint.
+        if force or fps.get(s.id) != f"{s.sha256}:{extraction_version}")
+    errors: list[tuple[Source, Exception]] = []
+    # Separate source workers keep short documents from leaving the model idle.
+    # The shared LLM semaphore still enforces the total request concurrency.
+    workers = min(4, max(1, llm.settings.max_concurrency))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        pending = {}
+
+        def submit_next() -> None:
+            s = next(pending_sources, None)
+            if s is None:
+                return
+            project.emit("extract", "progress", f"extracting knowledge from {s.path}", source=s.id)
+            # extract_source replaces old records; invalidate its prior checkpoint
+            # before a forced rerun, including when that rerun fails.
+            fps.pop(s.id, None)
+            project.save_state(project.load_state() | {"extract_fingerprints": fps})
+            pending[pool.submit(extract_source, project, llm, s, model=model)] = s
+
+        for _ in range(workers):
+            submit_next()
+        while pending:
+            future = next(as_completed(pending))
+            s = pending.pop(future)
+            try:
+                rep = future.result()
+            except Exception as exc:
+                errors.append((s, exc))
+                project.emit("extract", "warning", f"{s.path}: {type(exc).__name__}: {exc}", source=s.id)
+            else:
+                reports.append(rep)
+                fps[s.id] = f"{s.sha256}:{extraction_version}"
+                project.save_state(project.load_state() | {"extract_fingerprints": fps})
+                project.emit("extract", "item", f"{s.path}: {rep['objects']} objects, {rep['gaps']} gaps", **rep)
+                for p in rep.get("problems", [])[:10]:
+                    project.emit("extract", "warning", p, source=s.id)
+            # On failure finish and checkpoint work already running, but do not
+            # launch more requests until the user retries the build.
+            if not errors:
+                submit_next()
+    for sid in [k for k in fps if k not in {s.id for s in sources}]:
         fps.pop(sid)
     project.save_state(project.load_state() | {"extract_fingerprints": fps})
+    if errors:
+        s, exc = errors[0]
+        raise RuntimeError(f"Extraction failed for {s.path}: {exc}. Completed sources were saved; retry the build.") from exc
     stats = kb.stats()
     return {"extracted_sources": [r["source"] for r in reports], "objects": stats["objects"],
             "objects_by_type": stats["objects_by_type"], "gaps": stats["gaps"],

@@ -41,7 +41,7 @@ MAX_SHEETS = 20
 def read_frames(path: Path) -> list[tuple[str | None, pd.DataFrame]]:
     """Read a tabular file into (sheet name or None, frame) pairs."""
     suffix = path.suffix.lower()
-    if suffix in (".xlsx", ".xlsm"):
+    if suffix in (".xlsx", ".xlsm", ".xls"):
         sheets = pd.read_excel(path, sheet_name=None, nrows=MAX_ROWS)
         return [(str(name), df) for name, df in list(sheets.items())[:MAX_SHEETS]]
     if suffix == ".parquet":

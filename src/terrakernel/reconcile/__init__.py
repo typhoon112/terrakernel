@@ -19,6 +19,7 @@ overlapping groups by type and name similarity.
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -199,6 +200,72 @@ def _groups(objects: list[KnowledgeObject], budget: int = CATALOG_CHAR_BUDGET) -
     return groups
 
 
+def _gap_entry(gap: Gap) -> dict[str, Any]:
+    return {"gap_id": gap.id, "subject_id": gap.subject_id, "description": gap.description,
+            "severity": gap.severity.value}
+
+
+def _reconcile_groups(objects: list[KnowledgeObject], gaps: list[Gap], evidence_sources: dict[str, str],
+                      budget: int = CATALOG_CHAR_BUDGET) -> list[tuple[list[KnowledgeObject], list[Gap]]]:
+    """Keep object overlap, but send each gap once with relevant catalog context.
+
+    Reserve space for gaps, then split overflowing gap lists into additional
+    requests. Nothing is truncated or omitted, including gaps without a subject.
+    """
+    groups = _groups(objects, budget=max(1, budget * 3 // 4))
+    object_groups: dict[str, set[int]] = {}
+    source_groups: dict[str, set[int]] = {}
+    for i, group in enumerate(groups):
+        for obj in group:
+            object_groups.setdefault(obj.id, set()).add(i)
+            for source in obj.source_ids:
+                source_groups.setdefault(source, set()).add(i)
+    assigned: list[list[Gap]] = [[] for _ in groups]
+    loads = [0] * len(groups)
+    for gap in gaps:
+        candidates = object_groups.get(gap.subject_id or "", set())
+        if not candidates:
+            sources = {evidence_sources[eid] for eid in gap.evidence_ids if eid in evidence_sources}
+            sources.add(gap.id.removeprefix("gap:").split("/", 1)[0])
+            candidates = {i for source in sources for i in source_groups.get(source, set())}
+        index = min(candidates or range(len(groups)), key=lambda i: (loads[i], i))
+        assigned[index].append(gap)
+        loads[index] += len(json.dumps(_gap_entry(gap), ensure_ascii=False)) + 1
+
+    jobs: list[tuple[list[KnowledgeObject], list[Gap]]] = []
+    for group, group_gaps in zip(groups, assigned, strict=True):
+        base_size = sum(len(json.dumps(catalog_entry(o), ensure_ascii=False)) + 1 for o in group)
+        current: list[Gap] = []
+        size = base_size
+        emitted_group = False
+        for gap in group_gaps:
+            n = len(json.dumps(_gap_entry(gap), ensure_ascii=False)) + 1
+            if current and size + n > budget:
+                jobs.append((group, current))
+                emitted_group = True
+                current, size = [], base_size
+            if base_size + n > budget:
+                # An unusually long gap gets a separate request with as many
+                # relevant objects as fit, while the full group is still sent.
+                sources = {evidence_sources[eid] for eid in gap.evidence_ids if eid in evidence_sources}
+                context: list[KnowledgeObject] = []
+                context_size = n
+                for obj in sorted(group, key=lambda o: o.id != gap.subject_id):
+                    if obj.id != gap.subject_id and not sources.intersection(obj.source_ids):
+                        continue
+                    obj_size = len(json.dumps(catalog_entry(obj), ensure_ascii=False)) + 1
+                    if context_size + obj_size <= budget:
+                        context.append(obj)
+                        context_size += obj_size
+                jobs.append((context, [gap]))
+            else:
+                current.append(gap)
+                size += n
+        if current or not emitted_group:
+            jobs.append((group, current))
+    return jobs
+
+
 def _prompt(project: Project, group: list[KnowledgeObject], gaps: list[Gap]) -> str:
     cfg = project.config
     lines = [f"Project goal: {cfg.goal}"]
@@ -209,8 +276,7 @@ def _prompt(project: Project, group: list[KnowledgeObject], gaps: list[Gap]) -> 
     lines += [json.dumps(catalog_entry(o), ensure_ascii=False) for o in group]
     if gaps:
         lines.append("\nOpen gaps reported during extraction:")
-        lines += [json.dumps({"gap_id": g.id, "subject_id": g.subject_id, "description": g.description,
-                              "severity": g.severity.value}, ensure_ascii=False) for g in gaps]
+        lines += [json.dumps(_gap_entry(g), ensure_ascii=False) for g in gaps]
     lines.append("\nPropose relations, umbrella concepts, gap resolutions and new cross-source gaps.")
     return "\n".join(lines)
 
@@ -229,7 +295,7 @@ def run_reconcile(project: Project, llm: LLMClient, force: bool = False, **_: An
         c.execute("DELETE FROM gaps WHERE id LIKE 'gap:reconcile/%'")
         c.execute("UPDATE gaps SET resolved_by=NULL, resolution=NULL WHERE resolved_by LIKE 'reconcile:%'")
 
-    objects = [o for o in kb.objects() if o.status != ObjectStatus.superseded]
+    objects = [o for o in kb.objects() if o.status == ObjectStatus.active]
     ids = {o.id for o in objects}
     open_gaps = [g for g in kb.gaps() if not g.resolved_by]
     gap_ids = {g.id for g in open_gaps}
@@ -241,19 +307,33 @@ def run_reconcile(project: Project, llm: LLMClient, force: bool = False, **_: An
     records: list[ValidationRecord] = []
     system = skill_body("reconcile-knowledge")
 
-    for group in _groups(objects):
-        group_gaps = [g for g in open_gaps if g.subject_id is None or g.subject_id in {o.id for o in group}]
+    gap_evidence = kb.evidence_by_ids(eid for g in open_gaps for eid in g.evidence_ids)
+    jobs = _reconcile_groups(objects, open_gaps, {eid: ev.source_id for eid, ev in gap_evidence.items()},
+                             budget=max(1, CATALOG_CHAR_BUDGET - len(_prompt(project, [], [])) - 128))
+
+    def request(job: tuple[list[KnowledgeObject], list[Gap]]) -> ReconcileResult:
+        group, group_gaps = job
         project.emit("reconcile", "progress", f"relating {len(group)} objects and {len(group_gaps)} gaps")
-        result = llm.structured(_prompt(project, group, group_gaps), ReconcileResult, system=system, model=model,
-                                max_tokens=20000, tool_name="submit_reconciliation",
-                                tool_description="Submit relations, umbrella concepts, gap resolutions and new gaps.")
+        prompt = _prompt(project, group, group_gaps)
+        if len(prompt) > CATALOG_CHAR_BUDGET:
+            project.emit("reconcile", "warning", "A single catalog entry or gap exceeds the request budget; retained in full.")
+        return llm.structured(prompt, ReconcileResult, system=system, model=model,
+                              max_tokens=20000, tool_name="submit_reconciliation",
+                              tool_description="Submit relations, umbrella concepts, gap resolutions and new gaps.")
+
+    with ThreadPoolExecutor(max_workers=max(1, llm.settings.max_concurrency)) as pool:
+        # map preserves group order, so overlapping proposals are applied
+        # deterministically on the main thread after concurrent model calls.
+        results = list(pool.map(request, jobs))
+    for result in results:
         name_to_umbrella: dict[str, str] = {}
         for u in result.umbrella_concepts:
-            members = [m for m in u.member_ids if m in ids]
-            if len(members) < 2:
+            members = sorted(set(u.member_ids))
+            if len(members) < 2 or not set(members) <= ids:
                 records.append(ValidationRecord(id=f"val:reconcile:umbrella:{slugify(u.name)}", stage="reconcile",
                                                 target_id=u.name, check="umbrella_members", status="warn",
-                                                detail="dropped: fewer than two existing members", at=now_iso()))
+                                                detail="dropped: needs at least two active members and no inactive or unknown members",
+                                                at=now_iso()))
                 continue
             uid = f"concept:shared/{slugify(u.name, 50)}"
             name_to_umbrella[u.name] = uid
@@ -285,8 +365,8 @@ def run_reconcile(project: Project, llm: LLMClient, force: bool = False, **_: An
             relations[rid] = Relation(id=rid, type=RelationType(r.type), src=src, dst=dst, basis=Basis.inferred,
                                       note=note or (prev.note if prev else ""))
         for res in result.gap_resolutions:
-            by = [b for b in res.resolved_by if b in known]
-            if res.gap_id in gap_ids and by:
+            by = res.resolved_by
+            if res.gap_id in gap_ids and by and set(by) <= known:
                 resolutions[res.gap_id] = (by, res.explanation)
             else:
                 records.append(ValidationRecord(
@@ -339,7 +419,9 @@ def reconcile_added(project: Project, llm: LLMClient, new_ids: set[str]) -> dict
     """Relate newly added objects to the existing catalog without re-deriving existing relations."""
     kb = project.kb
     model = project.config.model
-    objects = [o for o in kb.objects() if o.status != ObjectStatus.superseded]
+    all_objects = kb.objects()
+    objects = [o for o in all_objects if o.status == ObjectStatus.active]
+    reopen_gaps_resolved_by(project, {o.id for o in all_objects if o.status != ObjectStatus.active})
     ids = {o.id for o in objects}
     new_ids = new_ids & ids
     if not new_ids:
@@ -371,8 +453,8 @@ def reconcile_added(project: Project, llm: LLMClient, new_ids: set[str]) -> dict
     gap_ids = {g.id for g in open_gaps}
     resolved = []
     for res in result.gap_resolutions:
-        by = [b for b in res.resolved_by if b in ids]
-        if res.gap_id in gap_ids and by and set(by) & new_ids:
+        by = res.resolved_by
+        if res.gap_id in gap_ids and by and set(by) <= ids and set(by) & new_ids:
             g = next(x for x in open_gaps if x.id == res.gap_id)
             g.resolved_by, g.resolution = "reconcile:" + ",".join(by), res.explanation
             resolved.append(g)

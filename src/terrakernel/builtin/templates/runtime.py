@@ -152,7 +152,7 @@ def load_dataset(name: str, raw: bool = False) -> pd.DataFrame:
 def _read_table(cfg: dict[str, Any]) -> pd.DataFrame:
     path = SOURCES_DIR / cfg["file"]
     suffix = path.suffix.lower()
-    if suffix in (".xlsx", ".xlsm"):
+    if suffix in (".xlsx", ".xlsm", ".xls"):
         return pd.read_excel(path, sheet_name=cfg.get("sheet") or 0)
     if suffix == ".parquet":
         return pd.read_parquet(path)

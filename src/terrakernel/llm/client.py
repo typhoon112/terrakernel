@@ -24,6 +24,7 @@ import json
 import re
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypeVar
@@ -224,7 +225,7 @@ class LLMClient:
             self.usage.add(data.get("model") or params.get("model", ""), data.get("usage", {}), from_cache=False)
         if path and mode in ("record", "auto"):
             path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".tmp")
+            tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
             tmp.write_text(json.dumps(data, ensure_ascii=False))
             tmp.replace(path)
         return data

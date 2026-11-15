@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class EvidenceRef(BaseModel):
@@ -20,6 +20,13 @@ class EvidenceRef(BaseModel):
 class Attribute(BaseModel):
     key: str
     value: str = Field(description="Attribute value. Use plain text, or JSON for lists/objects.")
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def preserve_unknown(cls, value: object) -> object:
+        # Some endpoints emit a JSON null for unknowns despite the string schema.
+        # Keep the same JSON-text contract; downstream parsing restores None.
+        return "null" if value is None else value
 
 
 class ExtractedObject(BaseModel):

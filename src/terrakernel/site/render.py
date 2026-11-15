@@ -43,13 +43,15 @@ CITE_RE = re.compile(r"\[\^([^\]\s]+)\](?!:)")
 FOOTNOTE_DEF_RE = re.compile(r"^\[\^[^\]]+\]:.*(?:\n(?!\[\^|\n).*)*", re.M)
 
 
-def md_to_html(text: str, object_href=None, base_href: str = "", wiki_links: dict[str, str] | None = None) -> str:
+def md_to_html(text: str, object_href=None, base_href: str = "", wiki_links: dict[str, str] | None = None,
+               link_href=None) -> str:
     """Render Markdown to HTML.
 
     Footnote citations ``[^object-id]`` become numbered links: ``object_href(object_id)`` decides
     the target (``None`` renders the citation as unresolved). Footnote definitions are dropped,
     because every citation links to the page of the cited knowledge object instead.
-    ``base_href`` prefixes relative links (for pages in subdirectories).
+    ``base_href`` prefixes links from the Markdown. Callback and wiki links are
+    already relative to the rendered page and are kept unchanged.
     """
     text, code_store = _render_code_fences(text)
     text = FOOTNOTE_DEF_RE.sub("", text)
@@ -70,6 +72,11 @@ def md_to_html(text: str, object_href=None, base_href: str = "", wiki_links: dic
     md = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable("table").enable("strikethrough")
     md.use(deflist_plugin)
     html = md.render(text)
+    if link_href:
+        html = re.sub(r'href="([^"]+)"', lambda m: f'href="{link_href(m.group(1))}"', html)
+    elif base_href:
+        html = re.sub(r'(href|src)="(?!https?://|#|mailto:|/)([^"]+)"',
+                      lambda m: f'{m.group(1)}="{base_href}{m.group(2)}"', html)
     for key, block in code_store.items():
         html = html.replace(f"<p>{key}</p>", block).replace(key, block)
     for key, mark in marks.items():
@@ -80,9 +87,6 @@ def md_to_html(text: str, object_href=None, base_href: str = "", wiki_links: dic
         for oid, href in wiki_links.items():
             label = oid.split(":", 1)[-1]
             html = html.replace(f"[[{oid}]]", f'<a class="obj" href="{href}">{label}</a>')
-    if base_href:
-        html = re.sub(r'(href|src)="(?!https?://|#|mailto:|/)([^"]+)"',
-                      lambda m: f'{m.group(1)}="{base_href}{m.group(2)}"', html)
     return html
 
 

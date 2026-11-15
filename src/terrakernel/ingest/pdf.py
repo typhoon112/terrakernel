@@ -289,19 +289,28 @@ def _furniture_key(word: dict[str, Any], words: list[dict[str, Any]], height: fl
 
 
 def _page_furniture(pdf: Any) -> set[str]:
-    """Header/footer lines that repeat on at least half of the pages (running titles, page numbers)."""
+    """Find running headers/footers using up to twelve evenly spaced pages.
+
+    Sampling is only for repeated margin detection. The ingest loop still reads
+    every page in full, without retaining a whole-book geometry cache.
+    """
     pages = pdf.pages
     if len(pages) < 3:
         return set()
+    sample_size = min(12, len(pages))
+    sampled = [pages[round(i * (len(pages) - 1) / (sample_size - 1))] for i in range(sample_size)]
     counts: dict[str, int] = {}
-    for page in pages:
+    for page in sampled:
         words = _extract_words(page)
         margin = page.height * 0.07
         keys = {_furniture_key(w, words, page.height) for w in words
                 if w["top"] < margin or w["bottom"] > page.height - margin}
         for k in keys:
             counts[k] = counts.get(k, 0) + 1
-    return {k for k, c in counts.items() if c >= max(3, len(pages) // 2)}
+        # pdfplumber keeps parsed geometry on each Page. A full-document first
+        # pass otherwise retains every page until the document is closed.
+        page.close()
+    return {k for k, c in counts.items() if c >= max(3, sample_size // 2)}
 
 
 def ingest_pdf(source: Source, path: Path, assets_dir: Path) -> list[Evidence]:
@@ -316,6 +325,7 @@ def ingest_pdf(source: Source, path: Path, assets_dir: Path) -> list[Evidence]:
             body_sizes: list[float] = []
             for page in pdf.pages[:3]:
                 body_sizes += [round(w.get("size", 0), 1) for w in page.extract_words(extra_attrs=["size"])]
+                page.close()
             body_size = statistics.mode(body_sizes) if body_sizes else 10.0
             furniture = _page_furniture(pdf)
 
@@ -342,6 +352,7 @@ def ingest_pdf(source: Source, path: Path, assets_dir: Path) -> list[Evidence]:
                 gutter = _find_gutter(free_words, page.width, body_size)
                 lines = _order_lines(free_words, gutter, min_gap=max(6.0, 0.9 * body_size))
                 if not lines and not tables and not image_boxes:
+                    page.close()
                     continue
                 bounds: dict[int, tuple[float, float]] = {}
                 for col in {ln["col"] for ln in lines}:
@@ -381,7 +392,7 @@ def ingest_pdf(source: Source, path: Path, assets_dir: Path) -> list[Evidence]:
                         prev["x1"] = max(prev["x1"], ln["x1"])
 
                 captions: list[dict[str, Any]] = []
-                page_sections: list[tuple[float, str | None]] = [(-1.0, (
+                page_sections: list[tuple[float, str | None]] = [(float("-inf"), (
                     f"{section_number} {section_title}" if section_number else section_title))]
                 block_no = 0
                 for bl in blocks:
@@ -439,22 +450,45 @@ def ingest_pdf(source: Source, path: Path, assets_dir: Path) -> list[Evidence]:
                           meta={"caption": caption["text"] if caption else None,
                                 "label": caption["label"] if caption else None, "rows": rows})
 
+                rendered_page = None
+                if image_boxes:
+                    render_page = None
+                    try:
+                        render_page = pdfium_doc[pno - 1]
+                        bitmap = render_page.render(scale=RENDER_SCALE)
+                        try:
+                            # The PIL view may share native memory, so detach it
+                            # before closing the bitmap. Reuse one render for all
+                            # figure crops on this page.
+                            rendered_page = bitmap.to_pil().copy()
+                        finally:
+                            bitmap.close()
+                    except Exception:
+                        pass
+                    finally:
+                        if render_page is not None:
+                            render_page.close()
                 for fno, box in enumerate(image_boxes, start=1):
                     caption = nearest_caption(box, False)
                     asset_name: str | None = f"{source.id}_p{pno}_f{fno}.png"
                     try:
-                        img = pdfium_doc[pno - 1].render(scale=RENDER_SCALE).to_pil()
-                        img.crop(tuple(int(v * RENDER_SCALE) for v in box)).save(assets_dir / asset_name)
+                        if rendered_page is None:
+                            raise ValueError("Page could not be rendered")
+                        with rendered_page.crop(tuple(int(v * RENDER_SCALE) for v in box)) as crop:
+                            crop.save(assets_dir / asset_name)
                     except Exception:
                         asset_name = None
                     text = caption["text"] if caption else f"Figure on page {pno} (no caption found)."
                     b.add(EvidenceKind.figure, text,
                           Locator(page=pno, bbox=[round(v, 1) for v in box], section=section_at(box[1])),
                           f"p{pno}-f{fno}", asset=asset_name, meta={"label": caption["label"] if caption else None})
+                if rendered_page is not None:
+                    rendered_page.close()
                 for c in captions:  # captions without a detected image or table (e.g. vector drawings)
                     b.add(EvidenceKind.figure if not c["is_table"] else EvidenceKind.table, c["text"],
                           Locator(page=pno, bbox=c["bbox"], section=c["section"]), f"p{pno}-cap-{c['label']}",
                           meta={"label": c["label"], "caption_only": True})
+                page.close()
     finally:
         pdfium_doc.close()
     if doc_title:

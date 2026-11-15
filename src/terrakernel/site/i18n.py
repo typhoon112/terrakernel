@@ -35,13 +35,18 @@ T: dict[str, tuple[str, str]] = {
     # hero
     "hero.kicker": ("A compiled research repository", "一个编译出来的科研仓库"),
     "hero.lede": (
-        "Every material in this repository was parsed into locatable evidence, every statement about "
-        "it is traced back to that evidence, and every tool was tested against values quoted from the "
-        "materials before an agent was allowed to use it.",
-        "这里每份资料都被拆成可定位的证据，每条知识都能回到原文，每个工具都用资料中摘录的数值验证过，才开放给 Agent 使用。",
+        "Explore knowledge with source locations and review flags. Tools show whether they were verified "
+        "against reference values, tested for properties, or withheld after failed checks.",
+        "查看知识及其证据来源，识别待复核内容。工具分别显示参考值验证、性质测试或检查失败后不可用的状态。",
     ),
     "hero.goto": ("Start with the cases", "从案例看起"),
+    "hero.tasks": ("Choose a research task", "选择研究任务"),
     "hero.repo": ("Inspect the repository", "查看生成的仓库"),
+    "tasks.title": ("Start your research", "开始研究"),
+    "tasks.intro": ("Choose a task to open its workflow, required inputs and steps.",
+                    "选择研究任务，查看对应流程、所需输入和操作步骤。"),
+    "tasks.open": ("Open workflow", "打开任务流程"),
+    "tasks.pending": ("Available after the workflow is built.", "任务流程构建完成后可用。"),
     # stats
     "stat.sources": ("materials", "份资料"),
     "stat.evidence": ("evidence units", "个证据单元"),
@@ -85,6 +90,10 @@ T: dict[str, tuple[str, str]] = {
         "每个案例都是资料需要解释的一处：一处冲突、一个没有答案的问题、一条变成可执行配置的规则，或一个需要验证的计算。",
     ),
     "cases.all": ("All", "全部"),
+    "cases.search": ("Search cases", "搜索案例"),
+    "cases.shown": ("shown", "已显示"),
+    "cases.more": ("Show 24 more", "再显示 24 条"),
+    "cases.empty": ("No cases match your search and filter.", "没有符合搜索及筛选条件的案例。"),
     "cases.source": ("What the materials say", "资料怎么说"),
     "cases.knowledge": ("What TerraKernel recorded", "TerraKernel 记下了什么"),
     "cases.became": ("What it became", "变成了什么"),
@@ -97,7 +106,11 @@ T: dict[str, tuple[str, str]] = {
     "case.conflict": ("Conflict", "冲突"),
     "case.gap": ("Open question", "待确认问题"),
     "case.answered": ("Answered by a person", "人工回答"),
-    "case.tool": ("Verified tool", "已验证工具"),
+    "case.resolved": ("Resolved questions", "已解决问题"),
+    "case.human": ("Answered by a person", "人工回答"),
+    "case.model": ("Resolved by model reconciliation", "模型跨来源关联解决"),
+    "case.other": ("Recorded resolution", "已记录解决方式"),
+    "case.tool": ("Tool", "工具"),
     "case.update": ("Update", "更新"),
     "case.review": ("Needs review", "需要复核"),
     # repo

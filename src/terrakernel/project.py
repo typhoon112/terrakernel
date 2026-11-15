@@ -57,7 +57,7 @@ class TaskSpec(BaseModel):
 class ProjectConfig(BaseModel):
     name: str
     goal: str
-    materials: str  # absolute path of the materials directory
+    materials: str  # absolute path, or a path relative to the generated repository
     tasks: list[TaskSpec] = Field(default_factory=list)
     model: str = "claude-opus-5-5"
     extract_model: str | None = None
@@ -122,7 +122,8 @@ class Project:
 
     @property
     def materials_dir(self) -> Path:
-        return Path(self.config.materials)
+        path = Path(self.config.materials)
+        return path if path.is_absolute() else (self.repo / path).resolve()
 
     @property
     def answers_path(self) -> Path:

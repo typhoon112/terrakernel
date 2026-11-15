@@ -110,11 +110,17 @@ def _object_payload(project: Project, o: KnowledgeObject) -> dict[str, Any]:
 
 def doc_body_prompt(project: Project, plan_doc: DocPlan, objects: list[KnowledgeObject], plan: RepositoryPlan,
                     tool_status: dict[str, str], issues: list[str] | None = None, previous: str | None = None) -> str:
+    from terrakernel.compile.context import gap_context
+
     kb = project.kb
     ids = {o.id for o in objects}
     rels = [r for r in kb.relations() if r.src in ids or r.dst in ids]
-    gaps = [g for g in kb.gaps() if not g.resolved_by and (g.subject_id in ids or g.subject_id is None)]
+    tasks = [task for task in project.config.tasks if task.id in plan_doc.task_ids]
+    task_text = "\n".join([plan_doc.title, plan_doc.description,
+                           *[f"{task.title} {task.prompt} {' '.join(task.acceptance)}" for task in tasks]])
+    gaps = gap_context(project, ids, task_text)
     links = [f"- [{d.title}](/{d.path}): {d.description}" for d in plan.docs if d.path != plan_doc.path]
+    links.append("- [Complete gap register](/gaps.md): all open and resolved gaps, including omitted context")
     tools = [f"- `{t.name}` ({t.strategy}, status {tool_status.get(t.name, 'not built')}): {t.purpose}; "
              f"methods {t.method_ids}" for t in plan.tools if set(t.method_ids) & ids or t.capability_id in ids]
     parts = [
@@ -125,8 +131,8 @@ def doc_body_prompt(project: Project, plan_doc: DocPlan, objects: list[Knowledge
           for o in objects],
         "", "Relations involving these objects:",
         *([f"- {r.type.value}: {r.src} -> {r.dst}. {r.note}" for r in rels] or ["- none"]),
-        "", "Open gaps (list them under 'Open questions'; do not answer them):",
-        *([f"- [{g.severity.value}] {g.description}" for g in gaps] or ["- none"]),
+        "", "Candidate gap reports (cross-check against the supplied objects and tool status):",
+        gaps.text,
         "", "Repository tools implementing these objects:", *(tools or ["- none"]),
         "", "Other documents you may link to:", *(links or ["- none"]),
     ]
@@ -342,7 +348,13 @@ def write_index(project: Project, plan: RepositoryPlan, doc_results: list[dict[s
             fm = yaml.safe_load((repo / c).read_text().split("---")[1])
             groups["computations"].append(f"* [{fm['title']}]({Path(c).relative_to('knowledge').as_posix()}) - "
                                           f"{fm['description']} (Attested Computation, {fm['x-terrakernel']['status']})")
-    lines = ["---", f'okf_version: "{OKF_VERSION}"', "---", ""]
+    write_catalog(project)
+    lines = ["---", f'okf_version: "{OKF_VERSION}"', "---", "",
+             "# Complete knowledge catalog", "",
+             "* [All extracted objects](catalog.md) — includes knowledge outside the task guides.",
+             "* [Machine-readable catalog](catalog.jsonl) — objects, original quotes and source locations.", ""]
+    lines += ["* [All open and resolved gaps](gaps.md) — the full register beyond task-specific selections.",
+              "* [Machine-readable gaps](gaps.jsonl) — gap IDs, status and original evidence locations.", ""]
     for folder, items in groups.items():
         lines.append(f"# {folder.replace('-', ' ').capitalize()}")
         lines.append("")
@@ -354,6 +366,77 @@ def write_index(project: Project, plan: RepositoryPlan, doc_results: list[dict[s
         items = [i.replace(f"]({folder}/", "](") for i in groups.get(folder, [])]
         (kroot / folder).mkdir(parents=True, exist_ok=True)
         write_text_stable(kroot / folder / "index.md", f"# {folder.replace('-', ' ').capitalize()}\n\n" + "\n".join(items) + "\n")
+
+
+def write_catalog(project: Project) -> None:
+    """Publish every object and its provenance, independently of planner selection."""
+    kb = project.kb
+    sources = {s.id: s for s in kb.sources()}
+    links: dict[str, list] = {}
+    for link in kb.links():
+        links.setdefault(link.object_id, []).append(link)
+    gaps = kb.gaps()
+    evidence = kb.evidence_by_ids({link.evidence_id for group in links.values() for link in group}
+                                  | {eid for gap in gaps for eid in gap.evidence_ids})
+    rows = []
+    body = ["# Complete knowledge catalog", "",
+            "Task guides organize a selected working set. This catalog preserves every extracted object, "
+            "including items awaiting review. Search the JSONL file by name, source or object ID for "
+            "full attributes, quotations and locators. Original evidence remains in the knowledge database.",
+            "", "[Download the searchable catalog](catalog.jsonl)", ""]
+    for obj in kb.objects():
+        row = obj.model_dump(mode="json")
+        refs = []
+        for link in links.get(obj.id, []):
+            ev = evidence.get(link.evidence_id)
+            source = sources.get(ev.source_id) if ev else None
+            refs.append({"evidence_id": link.evidence_id, "quote": link.quote,
+                         "source": source.path if source else None,
+                         "locator": ev.locator.model_dump(mode="json") if ev else None,
+                         "match_score": link.match_score})
+        row["evidence"] = refs
+        rows.append(json.dumps(row, ensure_ascii=False))
+        # Plain text avoids treating source-supplied bracket syntax as Markdown links.
+        name = obj.name.replace("[", "\\[").replace("]", "\\]").replace("\n", " ")
+        body.append(f"- **{name}** ({obj.type.value}; {obj.basis.value}; {obj.status.value}) — `{obj.id}`")
+    fm = {"type": "Reference", "title": "Complete knowledge catalog",
+          "description": "Deterministic inventory of all extracted knowledge, with full provenance in JSONL.",
+          "status": "stable", "generated": {"by": project.config.actor, "at": now_iso()},
+          "sources": [{"id": "kb", "resource": "../.terrakernel/kb.sqlite"}],
+          "x-terrakernel": {"catalog": True}}
+    write_text_stable(project.repo / "knowledge" / "catalog.jsonl", "\n".join(rows) + "\n")
+    write_text_stable(project.repo / "knowledge" / "catalog.md", render_okf(fm, "\n".join(body)))
+    gap_rows = []
+    gap_body = ["# Complete gap register", "",
+                "This register preserves every open and resolved gap. Artifact prompts contain only a bounded "
+                "selection; omission from a prompt does not resolve a gap.", "",
+                "Open entries are unconfirmed reports from limited evidence batches or reconciliation groups; "
+                "an answer may exist elsewhere, so check current knowledge and tools before concluding that "
+                "material or a capability is missing.", "",
+                "[Download all gaps and source locations](gaps.jsonl)", ""]
+    for gap in gaps:
+        row = gap.model_dump(mode="json")
+        row["evidence"] = []
+        for eid in gap.evidence_ids:
+            ev = evidence.get(eid)
+            source = sources.get(ev.source_id) if ev else None
+            row["evidence"].append({"evidence_id": eid, "source": source.path if source else None,
+                                    "locator": ev.locator.model_dump(mode="json") if ev else None})
+        gap_rows.append(json.dumps(row, ensure_ascii=False))
+        # Descriptions are source-derived text, not Markdown links to trust or validate.
+        description = gap.description.replace("[", "\\[").replace("]", "\\]")
+        state = "resolved" if gap.resolved_by else "open"
+        gap_body += [f"## {gap.id}", "", f"{state}; {gap.severity.value}", "", description, ""]
+        if gap.subject_id:
+            gap_body += [f"Subject: `{gap.subject_id}`", ""]
+        if gap.resolved_by:
+            resolution = (gap.resolution or "").replace("[", "\\[").replace("]", "\\]")
+            gap_body += [f"Resolved by: `{gap.resolved_by}`", "", resolution, ""]
+    gap_fm = {**fm, "title": "Complete gap register",
+              "description": "All open and resolved gaps, with original evidence locations in JSONL.",
+              "x-terrakernel": {"gap_register": True}}
+    write_text_stable(project.repo / "knowledge" / "gaps.jsonl", "\n".join(gap_rows) + "\n")
+    write_text_stable(project.repo / "knowledge" / "gaps.md", render_okf(gap_fm, "\n".join(gap_body)))
 
 
 def append_log(project: Project, entries: list[str]) -> None:

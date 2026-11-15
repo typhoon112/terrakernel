@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -65,20 +66,76 @@ def _parse_value(value: str) -> Any:
 def _format_evidence(ev: Evidence) -> str:
     loc = ev.locator.short()
     attrs = f'id="{ev.id}" kind="{ev.kind.value}"' + (f' locator="{loc}"' if loc else "")
-    return f"<evidence {attrs}>\n{ev.content}\n</evidence>"
+    return f"<evidence {attrs}>\n{ev.content}\n</evidence>" + _omml_context(ev)
+
+
+def _omml_context(ev: Evidence) -> str:
+    """Expose original equation structure without changing the text used for quote grounding."""
+    fragments = ev.meta.get("omml")
+    if not fragments:
+        return ""
+    if isinstance(fragments, str):
+        fragments = [fragments]
+    namespace = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
+
+    def compact(node: ET.Element) -> ET.Element | None:
+        if not node.tag.startswith(namespace):
+            return None  # Word run/font/language properties and bookmarks are not equation structure.
+        tag = node.tag[len(namespace):]
+        if tag in {"rPr", "ctrlPr"}:
+            return None
+        result = ET.Element(tag)
+        value = node.get(namespace + "val")
+        if value is not None:
+            result.set("val", value)
+        if node.text and (tag == "t" or node.text.strip()):
+            result.text = node.text
+        for child in node:
+            kept = compact(child)
+            if kept is not None:
+                result.append(kept)
+        if tag.endswith("Pr") and not len(result) and not result.attrib and not result.text:
+            return None
+        return result
+
+    equations = []
+    for index, fragment in enumerate(fragments, 1):
+        try:
+            tree = compact(ET.fromstring(fragment))
+        except (ET.ParseError, TypeError, ValueError):
+            tree = None
+        if tree is None:
+            equations.append(f"Equation {index}: original OMML could not be parsed; do not infer its formula.")
+        else:
+            equations.append(ET.tostring(tree, encoding="unicode", short_empty_elements=True))
+    return (
+        f'\n<source-math-structure evidence_id="{ev.id}">\n'
+        "These equations retain the original Word OMML structure with short tags and val attributes; "
+        "font and run-formatting properties are omitted. Use num/den, sub/sup, nary/chr and other "
+        "structure to read mathematical relationships lost in the flattened text above. "
+        "Citation quotes must still be copied verbatim from this evidence's original content above, "
+        "not from this XML or explanatory note. Do not guess missing symbols or reconstruct unsupported OLE equations.\n"
+        + "\n".join(equations)
+        + "\n</source-math-structure>"
+    )
 
 
 def batches(evidence: list[Evidence], budget: int = BATCH_CHAR_BUDGET) -> list[list[Evidence]]:
     out: list[list[Evidence]] = []
     cur: list[Evidence] = []
     size = 0
+    images = 0
     for ev in evidence:
         n = len(ev.content) + 120
-        if cur and size + n > budget:
+        if ev.meta.get("omml"):
+            n += len(_omml_context(ev))
+        if cur and (size + n > budget or (ev.asset and images >= MAX_IMAGES_PER_BATCH)):
             out.append(cur)
             cur, size = [], 0
+            images = 0
         cur.append(ev)
         size += n
+        images += bool(ev.asset)
     if cur:
         out.append(cur)
     return out

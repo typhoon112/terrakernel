@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import re
 import shutil
+import sqlite3
 import zipfile
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
+
+import yaml
 
 from terrakernel.project import Project
 
@@ -55,14 +59,69 @@ def _static(site_dir: Path) -> None:
 
 
 def _zip_repo(project: Project, out: Path) -> None:
+    """Export portable inputs and results without builder caches or task answer keys."""
     out.parent.mkdir(parents=True, exist_ok=True)
-    skip = {".git", "__pycache__", ".pytest_cache", ".venv", "llm-cache", "site"}
+    config = project.config.model_dump(mode="json")
+    expected = {
+        (Path(task.expected) if Path(task.expected).is_absolute() else project.repo / task.expected).resolve()
+        for task in project.config.tasks if task.expected
+    }
+    excluded_sources = {
+        Path("sources") / path.relative_to(project.materials_dir.resolve())
+        for path in expected if path.is_relative_to(project.materials_dir.resolve())
+    }
+    config["materials"] = "sources"
+    for task in config["tasks"]:
+        task["expected"] = None
+    root_skip = {".git", ".pytest_cache", ".venv", "site"}
+    state_skip = {"llm-cache", "ingest-cache", "runs", "updates", "logs", "debug",
+                  "events.jsonl", "state.json", "ingest-report.json", "kb.sqlite-wal", "kb.sqlite-shm"}
+    written: set[str] = set()
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as z:
         for p in sorted(project.repo.rglob("*")):
-            if any(part in skip for part in p.relative_to(project.repo).parts):
+            rel = p.relative_to(project.repo)
+            if not p.is_file() or p.resolve() == out.resolve() or p.resolve() in expected or rel in excluded_sources:
                 continue
-            if p.is_file():
-                z.write(p, arcname=f"{project.repo.name}/{p.relative_to(project.repo).as_posix()}")
+            # These are builder paths, not names reserved inside the user's source tree.
+            if rel.parts[0] != "sources" and (
+                rel.parts[0] in root_skip or "__pycache__" in rel.parts
+            ):
+                continue
+            if rel.parts[0] == ".terrakernel" and len(rel.parts) > 1:
+                if rel.parts[1] in state_skip:
+                    continue
+                if rel.parts[1] != "assets" and p.suffix in {".log", ".jsonl", ".tmp"}:
+                    continue
+            arcname = f"{project.repo.name}/{rel.as_posix()}"
+            if rel.as_posix() == ".terrakernel/project.yaml":
+                z.writestr(arcname, yaml.safe_dump(config, sort_keys=False, allow_unicode=True))
+            elif rel.as_posix() == ".terrakernel/kb.sqlite":
+                # SQLite may still have committed data in its WAL; a standalone copy needs a backup.
+                with TemporaryDirectory(prefix=".repo-export-", dir=out.parent) as temporary:
+                    snapshot = Path(temporary) / "kb.sqlite"
+                    with sqlite3.connect(snapshot) as target:
+                        project.kb.conn.backup(target)
+                        target.execute("PRAGMA journal_mode=DELETE")
+                    z.write(snapshot, arcname=arcname)
+            elif rel.as_posix() == ".terrakernel/validation.json":
+                z.writestr(arcname, redact(p.read_text(encoding="utf-8")))
+            elif rel.as_posix() in {"tasks.yaml", "tasks.yml", ".terrakernel/tasks.yaml", ".terrakernel/tasks.yml"}:
+                data = yaml.safe_load(p.read_text(encoding="utf-8"))
+                tasks = data.get("tasks", []) if isinstance(data, dict) else data
+                if isinstance(tasks, list):
+                    for task in tasks:
+                        if isinstance(task, dict) and "expected" in task:
+                            task["expected"] = None
+                z.writestr(arcname, yaml.safe_dump(data, sort_keys=False, allow_unicode=True))
+            else:
+                z.write(p, arcname=arcname)
+            written.add(rel.as_posix())
+        # Ingest-only previews have not yet mirrored sources during compile.
+        for source in project.kb.sources():
+            path = project.source_file(source)
+            rel = Path("sources") / source.path
+            if rel.as_posix() not in written and path.is_file() and path.resolve() not in expected and rel not in excluded_sources:
+                z.write(path, arcname=f"{project.repo.name}/{rel.as_posix()}")
 
 
 def _check_output(site_dir: Path) -> list[str]:
@@ -86,6 +145,11 @@ def export_site(project: Project, out: str | Path | None = None, site_config: st
         shutil.rmtree(site_dir)
     site_dir.mkdir(parents=True)
     _static(site_dir)
+    for name in ("catalog.jsonl", "gaps.jsonl"):
+        catalog = project.repo / "knowledge" / name
+        if catalog.is_file():
+            # Rendered knowledge pages resolve these downloads at the site root.
+            shutil.copyfile(catalog, site_dir / name)
 
     cases = pages.build_cases(data)
     _write(site_dir / "index.html", pages.index_page(data, cases, site_dir))
@@ -94,7 +158,16 @@ def export_site(project: Project, out: str | Path | None = None, site_config: st
     _write(site_dir / "limits.html", pages.limits_page(data))
     for case in cases:
         _write(site_dir / "cases" / f"{case['id']}.html", pages.case_page(data, case, site_dir))
-    for oid in data.objects:
+    pdf_sources = {source.id for source in data.sources if source.kind == "pdf"}
+
+    def first_pdf_position(oid: str) -> tuple[str, int]:
+        for link in data.links.get(oid, []):
+            evidence = data.evidence.get(link.evidence_id)
+            if evidence and evidence.source_id in pdf_sources and evidence.locator.page:
+                return evidence.source_id, evidence.locator.page
+        return "", 0
+
+    for oid in sorted(data.objects, key=first_pdf_position):
         _write(site_dir / "objects" / f"{pages._slug(oid)}.html", pages.object_page(data, oid, site_dir))
     for rel, doc in data.kdocs.items():
         _write(site_dir / "docs" / f"{pages._slug(rel)}.html", pages.doc_page(data, doc))

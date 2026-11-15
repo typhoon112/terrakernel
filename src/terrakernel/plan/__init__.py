@@ -11,19 +11,22 @@ from __future__ import annotations
 
 import json
 import keyword
+import math
 import re
+from collections import Counter
+from itertools import zip_longest
 from typing import Any
 
 import pandas as pd
 
 from terrakernel.builtin import skill_body
 from terrakernel.llm.client import LLMClient
-from terrakernel.models import Basis, KnowledgeObject, ObjectType, Severity
+from terrakernel.models import Basis, KnowledgeObject, ObjectStatus, ObjectType, Severity
 from terrakernel.plan.spec import Artifact, RepositoryPlan, RepositorySpec
 from terrakernel.project import Project
 from terrakernel.reconcile import catalog_entry
 from terrakernel.units import canonical_unit, dimension
-from terrakernel.util import now_iso, short_hash
+from terrakernel.util import now_iso, short_hash, write_text_stable
 
 RUNTIME_TOOLS = ["list_datasets", "load_dataset", "load_series", "load_array", "common_valid_sample",
                  "parameter_series", "convert_units", "dataset_info"]
@@ -38,12 +41,16 @@ DIGEST_BUDGET = 160_000
 
 def _digest(project: Project, level: int) -> str:
     kb = project.kb
-    objects = kb.objects()
-    lines = ["# Knowledge objects (JSON lines)"]
+    objects = [o for o in kb.objects() if o.status == ObjectStatus.active]
+    ids = {o.id for o in objects}
+    lines = ["# Active knowledge objects (JSON lines)",
+             "Objects awaiting review or superseded remain in the full catalog but cannot support planned artifacts."]
     lines += [json.dumps(catalog_entry(o, level), ensure_ascii=False) for o in objects]
     lines.append("\n# Relations")
     note_len = (220, 120, 80, 0)[level]
     for r in kb.relations():
+        if r.src not in ids or r.dst not in ids:
+            continue
         keep_note = note_len and (level < 2 or r.type.value in ("conflicts_with", "applies_to", "implements"))
         lines.append(f"{r.type.value}: {r.src} -> {r.dst}" + (f"  # {r.note[:note_len]}" if keep_note and r.note else ""))
     gaps = kb.gaps()
@@ -59,17 +66,147 @@ def _digest(project: Project, level: int) -> str:
     return "\n".join(lines)
 
 
+def _terms(text: str) -> set[str]:
+    """Language-independent lexical retrieval, including Chinese text without spaces."""
+    terms = set(re.findall(r"[a-z][a-z0-9_-]{1,}", text.casefold()))
+    terms -= {"the", "and", "for", "with", "from", "that", "this", "use", "using", "data"}
+    for run in re.findall(r"[\u3400-\u9fff]+", text):
+        terms.update(run[i:i + 2] for i in range(len(run) - 1))
+    return terms
+
+
+def _coverage(project: Project, text: str, selected: dict[str, str], mode: str, budget: int,
+              **details: Any) -> None:
+    objects = project.kb.objects()
+    report = {
+        "mode": mode, "budget_chars": budget, "digest_chars": len(text), "total_count": len(objects),
+        "selected_count": len(selected), "selected_object_ids": list(selected),
+        "omitted_object_ids": [o.id for o in objects if o.id not in selected],
+        "excluded_by_status": {o.id: o.status.value for o in objects if o.status != ObjectStatus.active},
+        "selection_reasons": selected, **details,
+    }
+    write_text_stable(project.state / "planning-coverage.json", json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def _working_digest(project: Project, budget: int) -> str:
+    """Bound the planner's working set; the complete KB remains intact and exported in the catalog."""
+    kb = project.kb
+    all_objects = kb.objects()
+    objects = [o for o in all_objects if o.status == ObjectStatus.active]
+    queries = [_terms(project.config.goal)] + [_terms(f"{t.title} {t.prompt} {' '.join(t.acceptance)}")
+                                              for t in project.config.tasks]
+    tokens = {o.id: _terms(f"{o.name} {' '.join(o.aliases)} {o.summary}") for o in objects}
+    frequencies = Counter(term for terms in tokens.values() for term in terms)
+    weights = {term: math.log(1 + len(objects) / count) for term, count in frequencies.items()}
+    priority = {ObjectType.method: 3, ObjectType.constraint: 3, ObjectType.capability: 3,
+                ObjectType.dataset: 2, ObjectType.concept: 1, ObjectType.claim: 0}
+
+    def score(o: KnowledgeObject, query: set[str]) -> float:
+        return sum(weights[t] for t in tokens[o.id] & query) * (1 + 0.2 * priority[o.type])
+
+    ranks = [sorted(objects, key=lambda o: (-score(o, q), -priority[o.type], o.id)) for q in queries]
+    selected: dict[str, str] = {}
+    entries: list[str] = []
+    used = 0
+    object_budget = int((budget - 1000) * 0.80)
+
+    def add(o: KnowledgeObject, reason: str, ceiling: int = object_budget) -> None:
+        nonlocal used
+        if o.id in selected:
+            return
+        entry = catalog_entry(o, 1)
+        entry["status"] = o.status.value
+        line = json.dumps(entry, ensure_ascii=False)
+        if len(line) > min(8000, object_budget // 4):
+            entry = catalog_entry(o, 3)
+            entry["status"] = o.status.value
+            line = json.dumps(entry, ensure_ascii=False)
+        # Oversized profiles remain in the catalog instead of crowding out every other source.
+        if used + len(line) + 1 <= ceiling:
+            entries.append(line)
+            selected[o.id] = reason
+            used += len(line) + 1
+
+    # Give each task a turn; a long first task cannot consume the whole prompt.
+    for row in zip_longest(*ranks):
+        for o in row:
+            if o is not None:
+                add(o, "goal/task relevance", int(object_budget * 0.65))
+    # Represent additional sources and computable profiles when lexical terms differ across languages.
+    represented = {sid for o in objects if o.id in selected for sid in o.source_ids}
+    overall = sorted(objects, key=lambda o: (-max(score(o, q) for q in queries), -priority[o.type], o.id))
+    for o in overall:
+        if set(o.source_ids) - represented:
+            before = len(selected)
+            add(o, "source coverage", int(object_budget * 0.80))
+            if len(selected) > before:
+                represented.update(o.source_ids)
+    by_id = {o.id: o for o in objects}
+    relations = kb.relations()
+    seeds = set(selected)
+    for r in sorted(relations, key=lambda r: (r.type.value != "conflicts_with", r.id)):
+        if r.src in seeds and r.dst in by_id:
+            add(by_id[r.dst], f"related to {r.src}")
+        if r.dst in seeds and r.src in by_id:
+            add(by_id[r.src], f"related to {r.dst}")
+    for o in overall:
+        add(o, "remaining relevance budget")
+
+    lines = ["# Task-focused knowledge working set (JSON lines)",
+             f"Selected {len(selected)} of {len(all_objects)} objects for planning within the prompt budget.",
+             "Selection uses active objects only, lexical relevance, task/source diversity and neighbors; not exhaustive.",
+             "All objects and original evidence remain in the KB; the compiled knowledge/catalog.md and "
+             "knowledge/catalog.jsonl expose the full catalog, including objects omitted here.",
+             "Do not claim complete methodological coverage. Plan only grounded, task-relevant capabilities; "
+             "use the full catalog for further research. Selection details: .terrakernel/planning-coverage.json.",
+             *entries]
+    length = sum(len(line) + 1 for line in lines)
+
+    def append(line: str, ceiling: int) -> bool:
+        nonlocal length
+        if length + len(line) + 1 > ceiling:
+            return False
+        lines.append(line)
+        length += len(line) + 1
+        return True
+
+    append("\n# Open gaps (remaining gaps are retained in the KB)", budget)
+    open_gaps = [g for g in kb.gaps() if not g.resolved_by]
+    gap_ids = []
+    for g in sorted(open_gaps, key=lambda g: (g.subject_id is not None and g.subject_id not in selected,
+                                            g.severity != Severity.blocking, g.id)):
+        if append(f"- [{g.severity.value}] ({g.id}) {g.description[:700]}", int(budget * 0.92)):
+            gap_ids.append(g.id)
+    append("\n# Relations among selected objects", budget)
+    relation_ids = []
+    for r in sorted(relations, key=lambda r: (r.type.value != "conflicts_with", r.id)):
+        if r.src in selected and r.dst in selected and append(
+                f"{r.type.value}: {r.src} -> {r.dst}  # {r.note[:120]}", budget - 180):
+            relation_ids.append(r.id)
+    append(f"\nPrompt omits {len(open_gaps) - len(gap_ids)} open gaps and "
+           f"{len(relations) - len(relation_ids)} relations; omission does not resolve a gap or conflict.", budget)
+    text = "\n".join(lines)
+    _coverage(project, text, selected, "task_working_set", budget, included_gap_ids=gap_ids,
+              omitted_gap_ids=[g.id for g in open_gaps if g.id not in gap_ids],
+              selected_relation_ids=relation_ids, omitted_relation_count=len(relations) - len(relation_ids))
+    project.emit("plan", "warning", f"planning working set: {len(selected)}/{len(all_objects)} objects "
+                 f"({len(text)} chars); full catalog preserved")
+    return text
+
+
 def kb_digest(project: Project, budget: int = DIGEST_BUDGET) -> str:
-    """The knowledge base as planner input, compacted progressively to fit ``budget`` characters."""
-    text = ""
+    """Compact the catalog, then select an explicit working set if the full catalog still does not fit."""
+    if budget < 2048:
+        raise ValueError("planning digest budget must be at least 2048 characters")
     for level in range(4):
         text = _digest(project, level)
         if len(text) <= budget:
             if level:
                 project.emit("plan", "warning", f"knowledge digest compacted to level {level} ({len(text)} chars)")
+            _coverage(project, text, {o.id: "full active catalog" for o in project.kb.objects()
+                                     if o.status == ObjectStatus.active}, "full_catalog", budget)
             return text
-    project.emit("plan", "warning", f"knowledge digest is {len(text)} chars even at maximum compaction")
-    return text
+    return _working_digest(project, budget)
 
 
 def plan_prompt(project: Project, issues: list[str] | None = None, previous: RepositoryPlan | None = None) -> str:
@@ -110,13 +247,15 @@ def validate_plan(plan: RepositoryPlan, project: Project) -> tuple[list[str], li
         for i in ids:
             if i not in objects:
                 fix.append(f"{where}: unknown object id {i!r}")
+            elif objects[i].status != ObjectStatus.active:
+                fix.append(f"{where}: object {i!r} is {objects[i].status.value}; only active objects may be used")
 
     # docs
     seen_paths: set[str] = set()
     covered: set[str] = set()
     for d in plan.docs:
-        if not DOC_PATH_RE.match(d.path) or ".." in d.path or d.path.rsplit("/", 1)[-1] in ("index.md", "log.md"):
-            fix.append(f"doc {d.path!r}: path must be lowercase kebab-case ending in .md and not index.md/log.md")
+        if not DOC_PATH_RE.match(d.path) or ".." in d.path or d.path.rsplit("/", 1)[-1] in ("index.md", "log.md") or d.path in {"catalog.md", "gaps.md"}:
+            fix.append(f"doc {d.path!r}: path must be lowercase kebab-case ending in .md; index.md, log.md and root catalog.md/gaps.md are reserved")
         if d.path in seen_paths:
             fix.append(f"doc {d.path!r}: duplicate path")
         seen_paths.add(d.path)
@@ -146,6 +285,7 @@ def validate_plan(plan: RepositoryPlan, project: Project) -> tuple[list[str], li
             fix.append(f"{where}: duplicate dataset name")
         names.add(ds.name)
         prof = objects.get(ds.profile_object_id)
+        check_ids([ds.profile_object_id], where)
         if prof is None or prof.type != ObjectType.dataset or prof.basis != Basis.measured:
             fix.append(f"{where}: profile_object_id must be a profiled (measured) dataset object")
             continue
@@ -214,6 +354,8 @@ def validate_plan(plan: RepositoryPlan, project: Project) -> tuple[list[str], li
         tnames.add(t.name)
         check_ids(t.method_ids, where)
         check_ids(t.test_object_ids, where)
+        if t.capability_id:
+            check_ids([t.capability_id], where)
         if t.strategy == "wrap_existing":
             cap = objects.get(t.capability_id or "")
             if cap is None or cap.type != ObjectType.capability or not cap.attributes.get("symbol"):
@@ -254,7 +396,8 @@ def validate_plan(plan: RepositoryPlan, project: Project) -> tuple[list[str], li
     for t in tasks - {s.task_id for s in plan.skills}:
         fix.append(f"task {t!r} has no skill")
     # coverage of task-relevant objects (warnings only)
-    relevant = {o.id for o in objects.values() if o.type in (ObjectType.method, ObjectType.constraint, ObjectType.dataset)}
+    relevant = {o.id for o in objects.values() if o.status == ObjectStatus.active
+                and o.type in (ObjectType.method, ObjectType.constraint, ObjectType.dataset)}
     missing = sorted(relevant - covered)
     if missing:
         gaps.append(f"objects not covered by any document: {', '.join(missing[:20])}")
@@ -264,7 +407,7 @@ def validate_plan(plan: RepositoryPlan, project: Project) -> tuple[list[str], li
 def _drop_invalid(plan: RepositoryPlan, project: Project) -> list[str]:
     """Last resort after repairs: remove items that still fail hard checks."""
     dropped: list[str] = []
-    objects = {o.id for o in project.kb.objects()}
+    objects = {o.id for o in project.kb.objects() if o.status == ObjectStatus.active}
     for d in plan.docs:
         d.object_ids = [i for i in d.object_ids if i in objects]
     fix, _ = validate_plan(plan, project)
