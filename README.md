@@ -233,4 +233,15 @@ tests/                         离线单元测试（不调用模型）
 
 ## 许可
 
-本仓库为 AI4Climate 黑客松参赛作品。在黑客松评审与展示期间保留所有权利，暂未附开源许可。第三方资料的版权归各自权利人；`web/public/data/` 中出现的原文摘录与页面截图仅用于说明 TerraKernel 的构建过程。
+TerraKernel 的原创代码、文档及前端采用 [PolyForm Noncommercial License 1.0.0](LICENSE)，允许按许可条款进行非商业使用、复制、修改和分发。分发时须保留许可条款或其链接，以及 [NOTICE](NOTICE) 中的必要声明。许可明确允许的用途以英文原文为准；未被该许可覆盖的商业用途，需要向相应权利人另行取得授权，可通过 [GitHub Issues](https://github.com/typhoon112/terrakernel/issues) 联系项目维护者。
+
+这是**非商业源码可用许可（source-available）**，由于限制商业用途，不属于 OSI 定义的开源许可证。
+
+第三方依赖、字体与研究资料不因本项目许可而改变其授权：
+
+- Python 与前端依赖保留各自许可证，版本记录在 `uv.lock` 与 `web/package-lock.json` 中。
+- IBM Plex 字体采用 SIL Open Font License 1.1，原许可随字体保留。
+- 论文、专著、标准及其原文摘录、截图、数据等保留原权利人的版权与使用条件。`web/public/data/` 中展示的第三方内容不纳入 TerraKernel 的许可授权，不能仅凭本项目许可认定可以再分发。
+- 使用 TerraKernel 处理资料不会自动获得输入资料的使用权；生成产物中的第三方内容和复用代码仍受其原有条件约束。
+
+**English:** TerraKernel's original code, documentation, and frontend are available under the PolyForm Noncommercial License 1.0.0. Noncommercial use, modification, and redistribution are permitted subject to its terms. Commercial uses not permitted by the licence require separate permission from the relevant rights holders. Third-party components and research materials retain their own licences and restrictions. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

@@ -3,6 +3,8 @@ name = "terrakernel"
 version = "0.1.0"
 description = "Compile multimodal research assets into an evidence-backed knowledge base and an AI-native research repository."
 readme = "README.md"
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=2.8,<3",

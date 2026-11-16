@@ -1,0 +1,43 @@
+TerraKernel
+
+Required Notice: Copyright 2026 TerraKernel contributors (https://github.com/typhoon112/terrakernel)
+
+Project licence
+---------------
+The original TerraKernel code, documentation, and frontend are provided
+under the PolyForm Noncommercial License 1.0.0 in LICENSE.
+https://polyformproject.org/licenses/noncommercial/1.0.0
+
+The licence permits noncommercial use, changes, and redistribution subject
+to its terms. Uses not permitted by the licence require separate permission
+from the relevant rights holders. Contact the project maintainers through
+https://github.com/typhoon112/terrakernel/issues for licensing enquiries.
+
+This is a source-available licence with a noncommercial restriction, not
+an OSI-approved open-source licence. This notice describes the scope of
+the project licence; it does not modify the PolyForm licence text.
+
+Third-party components
+----------------------
+Third-party dependencies and bundled components retain their own licences
+and copyright notices. The project licence does not replace or restrict
+rights granted under those licences. Dependency versions are recorded in
+uv.lock and web/package-lock.json; consult each dependency's own licence.
+
+IBM Plex fonts are distributed under the SIL Open Font License 1.1.
+Their original copyright and licence notices are retained in
+src/terrakernel/site/static/fonts/IBM-Plex-LICENSE.txt and
+web/public/fonts/IBM-Plex-LICENSE.txt.
+
+Research materials and generated content
+---------------------------------------
+Third-party papers, manuscripts, standards, datasets, quotations, page
+images, and other research materials are excluded from the project licence
+grant. They remain subject to their respective rights holders' terms.
+This includes third-party content in the web/public/data demonstration
+bundle, where source references identify the originating materials.
+
+Using TerraKernel does not grant rights to input materials. Third-party
+content and reused code in generated outputs remain subject to their
+original terms; the TerraKernel licence does not establish ownership of
+those outputs or override those terms.
