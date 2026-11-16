@@ -31,7 +31,6 @@ const UI: Dict = {
   'nav.replay': { zh: '构建回放', en: 'Replay' },
   'nav.layers': { zh: '生成结果', en: 'What was built' },
   'nav.knowledge': { zh: '知识目录', en: 'Knowledge' },
-  'nav.method': { zh: '方法与限制', en: 'Method & limits' },
   'brand.tag': { zh: '从科研资料到 Agent 可用的研究仓库', en: 'From research materials to a research repository an agent can use' },
   'cta.start': { zh: '看一次真实构建', en: 'Watch a real build' },
   'cta.layers': { zh: '看看生成了什么', en: 'See what was built' },

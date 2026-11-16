@@ -8,7 +8,6 @@ import ReplayPage from './pages/ReplayPage'
 import Layers from './pages/Layers'
 import ArtifactPage from './pages/ArtifactPage'
 import Knowledge from './pages/Knowledge'
-import Method from './pages/Method'
 
 function Routed() {
   const route = useRoute()
@@ -24,8 +23,6 @@ function Routed() {
         return <ArtifactPage id={route.param ?? ''} />
       case 'knowledge':
         return <Knowledge />
-      case 'method':
-        return <Method />
       default:
         return <Home />
     }

@@ -448,12 +448,14 @@ def export_web_cmd(
     repo: Annotated[Path, typer.Argument()],
     out: Annotated[Path, typer.Option(help="Output directory for the data bundle")],
     max_crops: Annotated[int, typer.Option(help="Maximum number of PDF page crops to render")] = 240,
+    exhibit: Annotated[list[str] | None, typer.Option(
+        help="Evidence id to export verbatim (a table as rows and cells); repeat the option for several")] = None,
 ) -> None:
     """Export the data bundle for the showcase web frontend (no model calls)."""
     from terrakernel.export_web import export_web
 
     project = Project.open(repo)
-    summary = export_web(project, out, max_crops=max_crops)
+    summary = export_web(project, out, max_crops=max_crops, exhibits=exhibit)
     if summary["leaks"]:
         console.print("[red]possible secrets or local paths in the bundle:[/]")
         for p in summary["leaks"]:

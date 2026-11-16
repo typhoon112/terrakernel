@@ -173,6 +173,31 @@ export type Graph = {
   relations: { s: string; t: string; k: string; note: string }[]
 }
 
+export type Exhibit = {
+  id: string
+  kind: string
+  source: string
+  path: string
+  loc: string
+  page: number | null
+  text: string
+  /** tables only: rows of cells as recorded */
+  rows?: string[][]
+}
+
+export type LibrarySource = {
+  id: string
+  path: string
+  kind: string
+  title: string
+  evidence: number
+  objects: number
+  in_artifacts: number
+  by_type: Record<string, number>
+  top: { id: string; t: string; n: string }[]
+  figures: { src: string; page: number | null; caption: string }[]
+}
+
 const cache = new Map<string, unknown>()
 
 async function getJSON<T>(file: string): Promise<T> {
@@ -192,6 +217,16 @@ export const loadChains = () => getJSON<Record<string, ChainObject[]>>('chains.j
 export const loadReplay = () => getJSON<Replay>('replay.json')
 export const loadGraph = () => getJSON<Graph>('graph.json')
 export const loadCatalog = () => getJSONLine<CatalogObject>('catalog.jsonl')
+export const loadExhibits = () => getJSON<Record<string, Exhibit>>('exhibits.json')
+export const loadLibrary = () => getJSON<LibrarySource[]>('library.json')
+
+/** Parse a number as printed in a source table ("1,219", "−42", "-"), or null. */
+export function cellNumber(cell: string | undefined): number | null {
+  if (cell == null) return null
+  const t = cell.replace(/[,\s]/g, '').replace(/[−–—]/g, '-')
+  if (!/^-?\d+(\.\d+)?$/.test(t)) return null
+  return Number(t)
+}
 
 async function getJSONLine<T>(file: string): Promise<T[]> {
   if (cache.has(file)) return cache.get(file) as T[]

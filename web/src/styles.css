@@ -84,3 +84,17 @@ body {
   body { background: #fff; color: #000; }
   nav, .no-print { display: none !important; }
 }
+
+/* range slider used by the calculators */
+.tk-range { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; outline: none; cursor: pointer;
+  background: linear-gradient(to right, var(--fill, #4fe3a4) var(--pct, 50%), rgba(214, 234, 223, 0.12) var(--pct, 50%)); }
+.tk-range::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: #070a09; border: 2px solid var(--fill, #4fe3a4); box-shadow: 0 0 10px -1px var(--fill, #4fe3a4); }
+.tk-range::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #070a09; border: 2px solid var(--fill, #4fe3a4); }
+.tk-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(79, 227, 164, 0.3); }
+
+@keyframes rise { 0% { transform: translateY(0) scale(0.7); opacity: 0 } 20% { opacity: 0.9 } 100% { transform: translateY(-34px) scale(1.25); opacity: 0 } }
+.plume { animation: rise 3.2s ease-out infinite; }
+@keyframes flowRight { to { stroke-dashoffset: -28; } }
+.flow-right { stroke-dasharray: 3 11; animation: flowRight 1.1s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .plume, .flow-right, .flow-line, .pulse { animation: none; } }

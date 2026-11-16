@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from '../lib/router'
 import { useLang, useUI } from '../lib/i18n'
+import { Kernel } from './ClimateIcons'
 
 export function Nav({ active }: { active?: string }) {
   const { lang, setLang } = useLang()
@@ -18,7 +19,6 @@ export function Nav({ active }: { active?: string }) {
     { to: '/replay', key: 'nav.replay' },
     { to: '/layers', key: 'nav.layers' },
     { to: '/knowledge', key: 'nav.knowledge' },
-    { to: '/method', key: 'nav.method' },
   ]
   return (
     <header
@@ -26,12 +26,7 @@ export function Nav({ active }: { active?: string }) {
     >
       <div className="mx-auto max-w-[1240px] px-5 md:px-8 h-16 flex items-center gap-6">
         <Link to="/" className="flex items-center gap-2.5 shrink-0" onClick={() => setOpen(false)}>
-          <svg viewBox="0 0 32 32" className="h-6 w-6" aria-hidden>
-            <circle cx="16" cy="16" r="13" fill="none" stroke="#4fe3a4" strokeWidth="1.4" opacity="0.9" />
-            <ellipse cx="16" cy="16" rx="5.4" ry="13" fill="none" stroke="#4fe3a4" strokeWidth="0.9" opacity="0.55" />
-            <path d="M3.5 16h25M5.5 10h21M5.5 22h21" stroke="#4fe3a4" strokeWidth="0.8" opacity="0.5" />
-            <circle cx="16" cy="16" r="2.4" fill="#efb75a" />
-          </svg>
+          <Kernel size={24} />
           <span className="display text-[17px] tracking-tight">TerraKernel</span>
         </Link>
         <nav className="hidden md:flex items-center gap-1 ml-2">

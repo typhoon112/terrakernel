@@ -163,12 +163,22 @@ uv run terrakernel serve artifacts/YYYYMMDD/demo/site --port 8765
 
 ### 黑客松展示网站（`web/`）
 
-`web/` 是一个独立的 Vite + React 站点，用于黑客松演示，主案例为碳排放责任核算（177 份资料 / 80,077 证据 / 16,827 知识对象 / 34 个产物）。
+`web/` 是一个独立的 Vite + React 站点，用于黑客松演示，主案例为碳排放责任核算（177 份资料 / 80,077 证据 / 16,827 知识对象 / 36 个产物 / 7 个 Skill / 3 个工具，其中 2 个已用原文算例验证）。
+
+页面把案例本身画出来，而不是罗列文字：发电厂责任图（原文表 40 的电厂按度电责任排在零线上下）可代入参数实时计算；产业链责任传递图（原文课例 427–430）；资料库地图（177 份资料按来源分组，块大小是抽出的知识量，点开看每份资料贡献的知识与原文图）；构建回放（各阶段的耗时与调用次数按日志压缩播放，多次运行合并为一次）。站点还展示一次真实的 Agent 运行（用生成的工具算 GHG Protocol 表 6.6 的电网平均因子），每一步读的文件与调用都能看到。
 
 - **数据来源**：`terrakernel export-web <构建好的仓库> --out web/public/data` 从仓库导出 JSON 数据包（约 12 MB，含 72 张精选原文截图）。站点不连接数据库、不调用模型，页面上的每个数字、每条原文摘录、每个测试结果都来自这次导出。
 - **页面**：工作流总览、构建回放（按真实构建日志压缩演示）、三层结果（知识 / Skill / 工具）、出处链（工具 → 知识对象 → 证据 → 资料）、知识目录（16,827 条可检索）、方法与限制。
 - **构建与预览**：`npm --prefix web ci && npm --prefix web run build`，产物在 `web/dist`；`npm --prefix web run dev` 用于本地预览。
-- **发布**：推送到 `main` 后由 `.github/workflows/pages.yml` 构建并发布到 GitHub Pages。`web/public/data/` 需要先导出并提交。
+- **发布**：推送到 `main` 后由 `.github/workflows/pages.yml` 构建并发布到 GitHub Pages。`web/public/data/` 需要先导出并提交：
+
+```bash
+uv run terrakernel export-web <构建好的仓库> --out web/public/data \
+  --exhibit ev:source:item/item/item/t12 --exhibit ev:source:item/item/item/t10 \
+  --exhibit ev:source:item/item/p23 --exhibit ev:source:item/item/p26
+```
+
+`--exhibit` 指定要原样展示的证据（表格导出为单元格，段落导出为文本），首页的三张图都从这些证据里读数，页面里不写死任何数值。
 
 ## 生成的仓库
 

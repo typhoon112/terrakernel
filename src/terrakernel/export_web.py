@@ -20,10 +20,11 @@ from typing import Any
 import yaml
 
 from terrakernel.project import Project
-from terrakernel.site import LOCAL_PATH_RE, SECRET_RE
+from terrakernel.site import LOCAL_PATH_RE, SECRET_RE, redact
 from terrakernel.site import assets as A
 
 BUNDLE_VERSION = 1
+AGENT_TOOLS = ("list_files", "read_file", "run_python", "submit_answer")
 STAGES = ["ingest", "extract", "reconcile", "plan", "compile", "validate"]
 STAGE_INFO = {
     "ingest": {"zh": "资料导入", "en": "Ingest"},
@@ -213,8 +214,13 @@ def _seconds_between(a: str, b: str) -> float:
 
 
 # ----------------------------------------------------------------------------- bundle
-def export_web(project: Project, out: str | Path, max_crops: int = MAX_CROPS) -> dict[str, Any]:
-    """Write the web bundle into ``out`` and return a summary (sizes per file, leaks)."""
+def export_web(project: Project, out: str | Path, max_crops: int = MAX_CROPS,
+               exhibits: list[str] | None = None, max_source_figures: int = 6) -> dict[str, Any]:
+    """Write the web bundle into ``out`` and return a summary (sizes per file, leaks).
+
+    ``exhibits`` names evidence units (ids) whose content the site shows as it stands: a table
+    is exported as rows and cells, a passage as text, each with its source and locator.
+    """
     out_dir = Path(out).resolve()
     if out_dir.exists():
         shutil.rmtree(out_dir)
@@ -340,6 +346,16 @@ def export_web(project: Project, out: str | Path, max_crops: int = MAX_CROPS) ->
     # ---- replay
     replay = _replay(project, events, sources_out)
     sizes["replay.json"] = _json(out_dir / "replay.json", replay)
+
+    # ---- library: every source with what was extracted from it, and figures cropped from it
+    library = _library(project, out_dir, sources_export, obj_by_id, links_by_obj, max_source_figures)
+    sizes["library.json"] = _json(out_dir / "library.json", library)
+
+    # ---- exhibits: evidence the site shows verbatim (tables as cells)
+    sizes["exhibits.json"] = _json(out_dir / "exhibits.json", _exhibits(project, exhibits or [], source_by_id))
+
+    # ---- one agent run, shown step by step on the site (no grading: the task has no answer key)
+    sizes["agentrun.json"] = _json(out_dir / "agentrun.json", _agent_run(project))
 
     # ---- media
     media_files = sum(1 for f in (out_dir / "media").rglob("*") if f.is_file()) if (out_dir / "media").exists() else 0
@@ -560,6 +576,109 @@ def _graph(project: Project, sources: list[dict], artifacts: list[dict], catalog
                                                                "possibly_same_as", "implements", "uses"):
             rels.append({"s": r.src, "t": r.dst, "k": r.type.value, "note": _short(r.note, 200)})
     return {"nodes": nodes, "edges": edges, "relations": rels}
+
+
+def _agent_run(project: Project) -> dict[str, Any] | None:
+    """The most recent saved agent run, reduced to what a reader can follow: steps, files read,
+    tool calls, the answer and how it was reached."""
+    if not project.runs_dir.exists():
+        return None
+    files = sorted(project.runs_dir.glob("*.json"), key=lambda f: f.stat().st_mtime)
+    for f in reversed(files):
+        try:
+            run = json.loads(f.read_text())
+        except json.JSONDecodeError:
+            continue
+        if run.get("status") != "answered":
+            continue
+        steps = []
+        for st in run.get("trace", []):
+            calls, ignored = [], 0
+            for c in st.get("tool_calls", []):
+                if c.get("name") in AGENT_TOOLS:
+                    calls.append({"name": c["name"], "input": _short(str(c.get("input") or ""), 500)})
+                else:  # a client tool the workspace does not offer; it is never executed
+                    ignored += 1
+            steps.append({
+                "step": st.get("step"),
+                "text": _short(st.get("text") or "", 700),
+                "calls": calls, "ignored_calls": ignored,
+                "results": [_short(str(r), 400) for r in (st.get("results") or [])][:6],
+            })
+        answer = run.get("answer") or {}
+        # Anything the model wrote goes through the same redaction as the rest of the site.
+        return json.loads(redact(json.dumps({
+            "id": run.get("run_id"), "task": run.get("task"), "model": run.get("model"),
+            "setting": run.get("setting"), "steps_n": run.get("steps"), "seconds": run.get("seconds"),
+            "usage": {k: run.get("usage", {}).get(k) for k in ("calls", "output", "cost_usd")},
+            "used_tools": run.get("used_repository_tools"), "python_calls": run.get("python_calls"),
+            "values": answer.get("values") or [], "summary": answer.get("summary") or "",
+            "open_issues": (answer.get("open_issues") or [])[:6], "citations": (answer.get("citations") or [])[:8],
+            "steps": steps}, ensure_ascii=False)))
+    return None
+
+
+def _exhibits(project: Project, ids: list[str], source_by_id: dict) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    found = project.kb.evidence_by_ids(ids)
+    for eid in ids:
+        ev = found.get(eid)
+        if ev is None:
+            continue
+        src = source_by_id.get(ev.source_id)
+        item: dict[str, Any] = {"id": ev.id, "kind": ev.kind.value, "source": ev.source_id,
+                                "path": src.path if src else ev.source_id, "loc": ev.locator.short() or "",
+                                "page": ev.locator.page, "text": ev.content[:6000]}
+        if ev.kind.value == "table":
+            item["rows"] = [line.split("\t") for line in ev.content.splitlines() if line.strip()][:80]
+        out[eid] = item
+    return out
+
+
+def _library(project: Project, out_dir: Path, sources: list[dict], obj_by_id: dict, links_by_obj: dict,
+             max_figures: int) -> list[dict[str, Any]]:
+    """Per source: object counts by type, the best-evidenced objects and a few figures from it."""
+    kb = project.kb
+    by_source: dict[str, list[Any]] = defaultdict(list)
+    for o in obj_by_id.values():
+        for sid in o.source_ids[:1]:
+            by_source[sid].append(o)
+    figures: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
+    for r in kb.conn.execute("SELECT source_id, locator, asset, content FROM evidence "
+                             "WHERE kind='figure' AND asset IS NOT NULL ORDER BY ord"):
+        loc = json.loads(r[1]) if r[1] else {}
+        figures[r[0]].append((loc.get("page") or 0, r[2], r[3] or ""))
+    out = []
+    fig_dir = out_dir / "media" / "fig"
+    for s in sources:
+        objs = by_source.get(s["id"], [])
+        by_type: dict[str, int] = defaultdict(int)
+        for o in objs:
+            by_type[o.type.value] += 1
+        top = sorted(objs, key=lambda o: (-len(links_by_obj.get(o.id, [])), o.type.value != "method", o.id))[:6]
+        figs = []
+        if s["in_artifacts"] or len(objs) >= 60:  # figures only for the sources the site foregrounds
+            for page, asset, caption in _spread(figures.get(s["id"], []), max_figures):
+                src_file = project.assets_dir / asset
+                if not src_file.exists() or src_file.stat().st_size > 900_000:
+                    continue
+                fig_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src_file, fig_dir / asset)
+                figs.append({"src": f"media/fig/{asset}", "page": page or None, "caption": _short(caption, 140)})
+        out.append({"id": s["id"], "path": s["path"], "kind": s["kind"], "title": s["title"],
+                    "evidence": s["evidence"], "objects": len(objs), "in_artifacts": s["in_artifacts"],
+                    "by_type": dict(by_type),
+                    "top": [{"id": o.id, "t": o.type.value, "n": _short(o.name, 120)} for o in top],
+                    "figures": figs})
+    return out
+
+
+def _spread(items: list[Any], n: int) -> list[Any]:
+    """Up to ``n`` items spread evenly over the list, so figures come from across a document."""
+    if len(items) <= n:
+        return items
+    step = len(items) / n
+    return [items[int(i * step)] for i in range(n)]
 
 
 def _check_leaks(out_dir: Path) -> list[str]:

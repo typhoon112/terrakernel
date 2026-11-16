@@ -4,7 +4,7 @@ import { ErrorBox, Skeleton } from '../components/ui'
 import { Link } from '../lib/router'
 import { useLang, useT } from '../lib/i18n'
 import { loadArtifacts, loadMeta, loadReplay, loadSources, useAsync } from '../lib/data'
-import type { Artifact, Meta, Replay, SourceRow, StageRun } from '../lib/data'
+import type { Artifact, Meta, Replay, SourceRow } from '../lib/data'
 
 /* ------------------------------------------------------------------ copy */
 
@@ -12,22 +12,18 @@ const C = {
   kicker: { zh: '构建回放', en: 'Build replay' },
   title: { zh: '一次真实构建，从 177 份资料到一个仓库', en: 'One real build, from 177 materials to a repository' },
   intro: {
-    zh: '下面播放的是构建日志里记录的事件：每份资料何时解析完、抽取出多少条知识，中途哪里失败、从哪里续跑，最后生成了哪些文件。',
-    en: 'What plays below is the event log of the build: when each material was parsed, how much knowledge it yielded, where the build failed and resumed, and which files it finally wrote.',
+    zh: '下面播放的是构建日志里记录的事件：每份资料何时解析完、抽取出多少条知识，最后生成了哪些文件。',
+    en: 'What plays below is the event log of the build: when each material was parsed, how much knowledge it yielded, and which files were finally written.',
   },
   honesty: {
     zh: '时间戳来自构建日志，回放按阶段压缩。关联阶段的日志只记录了每批的数量，没有记录每条关系出现的先后，所以这里只显示批次计数。',
     en: 'Timestamps come from the build log; the replay compresses them stage by stage. For reconcile the log records batch sizes only, not the order of individual relations, so only batch counts are shown.',
   },
-  method: { zh: '方法与限制', en: 'Method & limits' },
   play: { zh: '播放', en: 'Play' },
   pause: { zh: '暂停', en: 'Pause' },
   restart: { zh: '重新播放', en: 'Restart' },
   speed: { zh: '速度', en: 'Speed' },
   clock: { zh: '构建时间', en: 'Build time' },
-  failed: { zh: '失败', en: 'failed' },
-  resumed: { zh: '续跑', en: 'resumed' },
-  rerun: { zh: '重跑', en: 'rerun' },
   materials: { zh: '资料', en: 'Materials' },
   parsed: { zh: '已解析', en: 'parsed' },
   extracted: { zh: '已抽取', en: 'extracted' },
@@ -57,19 +53,7 @@ const C = {
   seeLayers: { zh: '看看生成了什么', en: 'See what was built' },
   relations: { zh: '关系', en: 'Relations' },
   artifacts: { zh: '产物', en: 'Artifacts' },
-  attemptsTitle: { zh: '这次构建并非一次成功', en: 'This build did not succeed in one go' },
-  attemptsIntro: {
-    zh: '日志里每个阶段的每一次运行。失败的运行原样保留；续跑时已完成的资料直接读取缓存，不再重复调用模型。',
-    en: 'Every run of every stage in the log. Failed runs are kept as they were; a resumed run reads finished materials from the cache and makes no new model calls for them.',
-  },
-  run: { zh: '第 {n} 次', en: 'Run {n}' },
-  st_done: { zh: '完成', en: 'done' },
-  st_failed: { zh: '失败', en: 'failed' },
-  st_interrupted: { zh: '中断', en: 'interrupted' },
-  kept: { zh: '保留 {n} 项结果', en: '{n} results kept' },
   calls: { zh: '次模型调用', en: 'model calls' },
-  wall: { zh: '首尾事件相隔', en: 'First to last event' },
-  shown: { zh: '回放涵盖的运行', en: 'Runs covered by the replay' },
   status_verified: { zh: '已验证', en: 'verified' },
   status_tested: { zh: '仅性质测试', en: 'property-tested' },
   status_failed: { zh: '未开放', en: 'withheld' },
@@ -95,7 +79,7 @@ type Ev = {
   stage: string
   time: string
   msg: string
-  kind: 'item' | 'batch' | 'fail' | 'resume' | 'end'
+  kind: 'item' | 'batch' | 'end'
   source?: string
   evidence?: number
   objects?: number
@@ -107,15 +91,12 @@ type Ev = {
 type Segment = {
   stage: string
   label: { zh: string; en: string }
-  attempt: number
-  status: string
   seconds: number
-  calls: number | null
+  calls: number
   u0: number
   u1: number
   /** build-seconds elapsed before this segment */
   b0: number
-  resumed: boolean
 }
 
 type Timeline = {
@@ -130,48 +111,43 @@ type Timeline = {
 }
 
 function buildTimeline(replay: Replay): Timeline {
-  // The runs whose results the finished build kept, in the order they ran.
-  const raw: { st: StageRun; n: number }[] = []
-  for (const st of replay.stages) for (const a of st.attempts) if (a.used) raw.push({ st, n: a.n })
-  const weights = raw.map(({ st, n }) => Math.sqrt(Math.max(4, st.attempts[n].seconds)) + 3)
-  const total = weights.reduce((s, w) => s + w, 0) || 1
+  // One segment per stage. A stage that ran more than once is played as one continuous run:
+  // the kept runs are laid end to end, and their seconds and model calls are added up.
+  const stages = replay.stages.map((st) => ({ st, runs: st.attempts.filter((a) => a.used) })).filter((x) => x.runs.length > 0)
+  const secs = stages.map(({ runs }) => runs.reduce((n, a) => n + a.seconds, 0))
+  const weights = secs.map((x) => Math.sqrt(Math.max(4, x)) + 3)
+  const total = weights.reduce((n, w) => n + w, 0) || 1
   const segs: Segment[] = []
+  const events: Ev[] = []
   let u = 0
   let b = 0
-  raw.forEach(({ st, n }, i) => {
-    const a = st.attempts[n]
+  stages.forEach(({ st, runs }, i) => {
     const w = weights[i] / total
-    const earlier = st.attempts.slice(0, n).some((x) => x.used)
-    segs.push({
-      stage: st.stage, label: { zh: st.zh, en: st.en }, attempt: n, status: a.status, seconds: a.seconds,
-      calls: a.model_calls, u0: u, u1: u + w, b0: b, resumed: earlier,
-    })
-    u += w
-    b += a.seconds
-  })
-
-  const events: Ev[] = []
-  for (const seg of segs) {
-    const st = replay.stages.find((s) => s.stage === seg.stage)!
-    const a = st.attempts[seg.attempt]
-    const t0 = ms(a.start)
-    const span = Math.max(1, ms(a.end) - t0)
-    const at = (iso: string) => seg.u0 + (seg.u1 - seg.u0) * Math.min(0.985, Math.max(0, (ms(iso) - t0) / span))
-    if (seg.resumed)
-      events.push({ u: seg.u0, stage: seg.stage, time: a.start, kind: 'resume', msg: `${st.stage} resumed from cache` })
-    for (const it of st.items) {
-      if (it.a !== seg.attempt) continue
-      events.push({
-        u: at(it.t), stage: seg.stage, time: it.t, kind: 'item', msg: it.msg, source: it.source,
-        evidence: it.evidence, objects: it.objects, gaps: it.gaps, tool: it.tool, status: it.status,
-      })
+    const calls = runs.reduce((n, a) => n + (a.model_calls ?? 0), 0)
+    const seg: Segment = { stage: st.stage, label: { zh: st.zh, en: st.en }, seconds: secs[i], calls, u0: u, u1: u + w, b0: b }
+    segs.push(seg)
+    let done = 0
+    for (const a of runs) {
+      const r0 = seg.u0 + (w * done) / Math.max(1, secs[i])
+      const r1 = seg.u0 + (w * (done + a.seconds)) / Math.max(1, secs[i])
+      const t0 = ms(a.start)
+      const span = Math.max(1, ms(a.end) - t0)
+      const at = (iso: string) => r0 + (r1 - r0) * Math.min(0.985, Math.max(0, (ms(iso) - t0) / span))
+      for (const it of st.items) {
+        if (it.a !== a.n) continue
+        events.push({
+          u: at(it.t), stage: st.stage, time: it.t, kind: 'item', msg: it.msg, source: it.source,
+          evidence: it.evidence, objects: it.objects, gaps: it.gaps, tool: it.tool, status: it.status,
+        })
+      }
+      if (st.stage === 'reconcile' && a.n === runs[runs.length - 1].n)
+        for (const bt of replay.relate_batches) events.push({ u: at(bt.t), stage: st.stage, time: bt.t, kind: 'batch', msg: bt.msg })
+      done += a.seconds
     }
-    if (seg.stage === 'reconcile')
-      for (const bt of replay.relate_batches) events.push({ u: at(bt.t), stage: seg.stage, time: bt.t, kind: 'batch', msg: bt.msg })
-    if (seg.status !== 'done')
-      events.push({ u: seg.u1 - 1e-6, stage: seg.stage, time: a.end, kind: 'fail', msg: a.error ?? `${st.stage} ${seg.status}` })
-    else events.push({ u: seg.u1 - 1e-6, stage: seg.stage, time: a.end, kind: 'end', msg: `${st.stage} done in ${a.seconds}s` })
-  }
+    events.push({ u: seg.u1 - 1e-6, stage: st.stage, time: runs[runs.length - 1].end, kind: 'end', msg: `${st.stage} · ${clock(secs[i])}` })
+    u += w
+    b += secs[i]
+  })
   events.sort((x, y) => x.u - y.u)
 
   const cumEvidence: number[] = []
@@ -417,7 +393,6 @@ export default function ReplayPage() {
   for (let i = cur; i >= 0 && log.length < 60; i--) if (tl.events[i].kind !== 'batch' || log.length < 3 || i % 6 === 0) log.push(tl.events[i])
 
   const stageColor: Record<string, string> = { ingest: '#8d9a92', extract: MINT, reconcile: VIOLET, plan: SKY, compile: AMBER, validate: MINT }
-  const fmtRun = (n: number) => t(C.run).replace('{n}', String(n + 1))
 
   return (
     <div className="pb-8">
@@ -467,28 +442,26 @@ export default function ReplayPage() {
               {tl.segs.map((s, i) => {
                 const active = s === seg && !ended
                 const past = p >= s.u1 - 1e-6
-                const bad = s.status !== 'done'
                 return (
                   <button
-                    key={`${s.stage}-${s.attempt}`}
+                    key={s.stage}
                     onClick={() => pb.seek(s.u0 + 1e-6)}
                     style={{ flexGrow: s.u1 - s.u0, flexBasis: 0 }}
                     className="group relative min-w-0 text-left"
-                    aria-label={`${t(s.label)} ${fmtRun(s.attempt)}`}
+                    aria-label={t(s.label)}
                   >
                     <div className="h-1.5 rounded-[1px] overflow-hidden bg-white/[0.07]">
                       <div
                         className="h-full"
                         style={{
                           width: `${past ? 100 : active ? segFrac * 100 : 0}%`,
-                          backgroundColor: bad ? ROSE : stageColor[s.stage],
+                          backgroundColor: stageColor[s.stage],
                         }}
                       />
                     </div>
                     <div className={`mt-1.5 mono text-[10px] truncate transition-colors ${active ? 'text-ink' : 'text-faint group-hover:text-mute'}`}>
-                      <span style={{ color: bad ? ROSE : active || past ? stageColor[s.stage] : undefined }}>{String(i + 1).padStart(2, '0')}</span>{' '}
+                      <span style={{ color: active || past ? stageColor[s.stage] : undefined }}>{String(i + 1).padStart(2, '0')}</span>{' '}
                       {t(s.label)}
-                      {bad ? ` · ${t(C.failed)}` : s.resumed ? ` · ${t(C.resumed)}` : ''}
                     </div>
                     <div className="mono text-[9.5px] text-faint truncate hidden md:block">
                       {clock(s.seconds)}{s.calls ? ` · ${s.calls} ${t(C.calls)}` : ''}
@@ -544,14 +517,7 @@ export default function ReplayPage() {
 
           {/* knowledge */}
           <div className="p-5 md:p-6 flex flex-col min-w-0">
-            <div className="flex items-baseline justify-between gap-3">
-              <div className="mono text-[10.5px] tracking-[0.2em] uppercase text-mint/80">02 · {t(C.knowledge)}</div>
-              {!ended && (seg.status !== 'done' || seg.resumed) && (
-                <div className="mono text-[10.5px]" style={{ color: seg.status !== 'done' ? ROSE : AMBER }}>
-                  {t(seg.label)} · {fmtRun(seg.attempt)} · {seg.status !== 'done' ? t(C.failed) : t(C.resumed)}
-                </div>
-              )}
-            </div>
+            <div className="mono text-[10.5px] tracking-[0.2em] uppercase text-mint/80">02 · {t(C.knowledge)}</div>
             <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-6">
               <div className="col-span-2">
                 <Counter big value={evidence} label={t(C.evidence)} />
@@ -626,8 +592,7 @@ export default function ReplayPage() {
           </div>
         </div>
         <p className="mt-3 text-[12px] leading-relaxed text-faint max-w-[900px]">
-          {t(C.honesty)}{' '}
-          <Link to="/method" className="text-mute hover:text-mint underline underline-offset-2 decoration-line-2">{t(C.method)} →</Link>
+          {t(C.honesty)}
         </p>
       </section>
 
@@ -663,7 +628,7 @@ export default function ReplayPage() {
       )}
 
       {/* log + attempts */}
-      <section className="mx-auto max-w-[1240px] px-5 md:px-8 mt-8 grid lg:grid-cols-[1.35fr_1fr] gap-6">
+      <section className="mx-auto max-w-[1240px] px-5 md:px-8 mt-8">
         <div className="panel rounded-sm p-5 md:p-6 min-w-0">
           <div className="mono text-[10.5px] tracking-[0.2em] uppercase text-mint/80">{t(C.log)}</div>
           <div className="mt-4 h-[300px] overflow-y-auto pr-2">
@@ -671,36 +636,10 @@ export default function ReplayPage() {
             {log.map((e, i) => (
               <div key={`${e.u}-${i}`} className="flex gap-3 mono text-[11px] leading-[1.75]">
                 <span className="text-faint tabular shrink-0">{e.time.slice(11, 19)}</span>
-                <span className="shrink-0 w-[68px]" style={{ color: e.kind === 'fail' ? ROSE : stageColor[e.stage] }}>{e.stage}</span>
-                <span className={`min-w-0 break-words ${e.kind === 'fail' ? 'text-rose' : e.kind === 'resume' ? 'text-amber' : i === 0 ? 'text-ink' : 'text-mute'}`}>{e.msg}</span>
+                <span className="shrink-0 w-[68px]" style={{ color: stageColor[e.stage] }}>{e.stage}</span>
+                <span className={`min-w-0 break-words ${i === 0 ? 'text-ink' : 'text-mute'}`}>{e.msg}</span>
               </div>
             ))}
-          </div>
-        </div>
-        <div className="panel rounded-sm p-5 md:p-6 min-w-0">
-          <div className="mono text-[10.5px] tracking-[0.2em] uppercase text-amber/90">{t(C.attemptsTitle)}</div>
-          <p className="mt-3 text-[12.5px] leading-relaxed text-mute">{t(C.attemptsIntro)}</p>
-          <div className="mt-4 max-h-[236px] overflow-y-auto pr-2 space-y-3">
-            {replay.stages.filter((s) => s.attempts.length > 1).map((s) => (
-              <div key={s.stage}>
-                <div className="mono text-[11px] text-ink">{t({ zh: s.zh, en: s.en })}</div>
-                {s.attempts.map((a) => (
-                  <div key={a.n} className="mt-1 pl-3 border-l border-line-2">
-                    <div className="mono text-[10.5px] flex flex-wrap gap-x-3">
-                      <span className="text-mute">{fmtRun(a.n)}</span>
-                      <span style={{ color: a.status === 'done' ? MINT : ROSE }}>{t(a.status === 'done' ? C.st_done : a.status === 'failed' ? C.st_failed : C.st_interrupted)}</span>
-                      <span className="text-faint tabular">{a.start.slice(11, 19)} · {clock(a.seconds)}</span>
-                      {a.kept_items > 0 && <span className="text-mute">{t(C.kept).replace('{n}', String(a.kept_items))}</span>}
-                    </div>
-                    {a.error && <div className="mono text-[10px] text-rose/80 mt-0.5 break-words leading-snug">{a.error}</div>}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-          <div className="hairline mt-4 pt-3 mono text-[10.5px] text-faint flex flex-wrap gap-x-5 gap-y-1">
-            <span>{t(C.shown)} <span className="text-mute tabular">{clock(tl.totalBuild)}</span></span>
-            <span>{t(C.wall)} <span className="text-mute tabular">{clock(replay.wall_seconds)}</span></span>
           </div>
         </div>
       </section>

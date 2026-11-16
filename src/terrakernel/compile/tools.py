@@ -39,7 +39,39 @@ UNITS_SRC = Path(__file__).resolve().parents[1] / "units.py"
 FORBIDDEN_NAMES = {"open", "exec", "eval", "compile", "__import__", "input", "globals", "locals", "breakpoint",
                    "os", "sys", "subprocess", "socket", "shutil", "pathlib", "requests", "urllib", "importlib"}
 ALLOWED_IMPORTS = {"math", "numpy", "pandas", "statistics"}
-NUMBER_RE = re.compile(r"(?<![\w.])[-−]?\d+(?:[.,]\d+)?(?:[eE][-+]?\d+)?")
+# A number as written in the materials: optional sign, digits with optional thousands groups or one
+# decimal separator, optional exponent. It may touch a unit or a CJK character ("100kgCO2",
+# "为100"), but must not be the tail of an identifier or of another number ("t11", "p4", "1.2.3").
+NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.,])[-−]?\d+(?:,\d{3})+(?:\.\d+)?(?![\d.]\d)"
+                       r"|(?<![A-Za-z0-9_.,])[-−]?\d+(?:[.,]\d+)?(?:[eE][-+]?\d+)?(?!\.\d)")
+_THOUSANDS_RE = re.compile(r"[-−]?\d{1,3}(?:,\d{3})+(?:\.\d+)?")
+
+
+def _readings(literal: str) -> list[tuple[float, int]]:
+    """Possible values of a number literal with the decimals it shows.
+
+    "50,000" is fifty thousand in English-language tables and 50.000 where the comma is the
+    decimal separator; the text alone does not say which, so both readings are offered and the
+    caller checks whether the claimed value is one of them.
+    """
+    lit = literal.replace("−", "-")
+    out: list[tuple[float, int]] = []
+
+    def add(text: str) -> None:
+        try:
+            out.append((float(text), len(text.split(".")[1].split("e")[0].split("E")[0]) if "." in text else 0))
+        except ValueError:
+            pass
+
+    if "," not in lit:
+        add(lit)
+    elif _THOUSANDS_RE.fullmatch(lit):
+        add(lit.replace(",", ""))
+        if "." not in lit and lit.count(",") == 1:
+            add(lit.replace(",", "."))
+    elif "." not in lit:
+        add(lit.replace(",", "."))
+    return out
 
 
 # ============================================================== configs and runtime
@@ -170,24 +202,16 @@ class TestDerivation(BaseModel):
 
 
 def _numbers(text: str) -> list[float]:
-    out = []
-    for m in NUMBER_RE.findall(text.replace("−", "-")):
-        try:
-            out.append(float(m.replace(",", "") if m.count(",") and "." in m else m.replace(",", ".")))
-        except ValueError:
-            pass
-    return out
+    """Every value a number written in ``text`` can stand for (see ``_readings``)."""
+    return [value for m in NUMBER_RE.findall(text) for value, _ in _readings(m)]
 
 
 def _quoted_precision(expected: float, quote: str) -> float | None:
-    for m in NUMBER_RE.findall(quote.replace("−", "-")):
-        lit = m.replace(",", ".")
-        try:
-            if abs(float(lit) - expected) <= 1e-12 + 1e-9 * abs(expected):
-                decimals = len(lit.split(".")[1]) if "." in lit else 0
+    """Half a unit of the last digit shown, if ``expected`` is written in the quote; else None."""
+    for m in NUMBER_RE.findall(quote):
+        for value, decimals in _readings(m):
+            if abs(value - expected) <= 1e-12 + 1e-9 * abs(expected):
                 return 0.5 * 10 ** (-decimals) + 1e-9
-        except ValueError:
-            continue
     return None
 
 
