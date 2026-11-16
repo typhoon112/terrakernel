@@ -1,6 +1,7 @@
 # TerraKernel showcase site
 
-The hackathon showcase: workflow, build replay, the three compiled layers and the provenance
+The hackathon showcase: workflow, build replay, what was built (an overview poster, a wiring
+diagram of documents, skills and tools, and one drawn card per artifact) and the provenance
 chain of every tool, skill and document, rendered from a real build.
 
 ## Data

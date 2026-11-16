@@ -173,6 +173,60 @@ export function Balance(p: P) {
   )
 }
 
+/** Accounting boundary: what is inside the line and what is not. */
+export function Boundary(p: P) {
+  return (
+    <Base {...p}>
+      <circle cx="24" cy="24" r="18" strokeDasharray="3 4.2" />
+      <circle cx="24" cy="24" r="10.5" />
+      <circle cx="24" cy="24" r="3" fill="currentColor" stroke="none" />
+      <path d="M34.5 24h7.5" opacity="0.7" />
+    </Base>
+  )
+}
+
+/** Input-output table: flows between regions and sectors. */
+export function Matrix(p: P) {
+  return (
+    <Base {...p}>
+      <rect x="7" y="7" width="34" height="34" rx="2" />
+      <path d="M18.3 7v34M29.7 7v34M7 18.3h34M7 29.7h34" opacity="0.6" />
+      <rect x="9.6" y="9.6" width="6.2" height="6.2" fill="currentColor" stroke="none" opacity="0.85" />
+      <rect x="20.9" y="20.9" width="6.2" height="6.2" fill="currentColor" stroke="none" opacity="0.85" />
+      <rect x="32.2" y="32.2" width="6.2" height="6.2" fill="currentColor" stroke="none" opacity="0.85" />
+      <rect x="32.2" y="9.6" width="6.2" height="6.2" fill="currentColor" stroke="none" opacity="0.35" />
+      <rect x="9.6" y="20.9" width="6.2" height="6.2" fill="currentColor" stroke="none" opacity="0.35" />
+    </Base>
+  )
+}
+
+/** A published standard: a document carrying a seal. */
+export function Standards(p: P) {
+  return (
+    <Base {...p}>
+      <path d="M11 5h17l8 8v13M11 5v38h11" />
+      <path d="M28 5v8h8" />
+      <path d="M16 20h12M16 26h7" opacity="0.7" />
+      <circle cx="32" cy="33" r="5.5" />
+      <path d="M29 37.8l-1.4 5.7 4.4-2.4 4.4 2.4-1.4-5.7" />
+    </Base>
+  )
+}
+
+/** Value chain: upstream, the reporting company, downstream. */
+export function Chain(p: P) {
+  return (
+    <Base {...p}>
+      <rect x="3" y="19" width="10" height="10" rx="1.5" />
+      <rect x="19" y="17" width="10" height="14" rx="1.5" />
+      <rect x="35" y="19" width="10" height="10" rx="1.5" />
+      <path d="M13 24h6M29 24h6" />
+      <path d="M16 21.8l2.4 2.2-2.4 2.2M32 21.8l2.4 2.2-2.4 2.2" />
+      <path d="M8 19c0-9 32-9 32 0" strokeDasharray="2.5 3.5" opacity="0.7" />
+    </Base>
+  )
+}
+
 /** The TerraKernel mark: a globe with a kernel at its centre. */
 export function Kernel({ size = 48, ...rest }: P) {
   return (

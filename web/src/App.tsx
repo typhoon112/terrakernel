@@ -5,7 +5,7 @@ import { Nav, Footer } from './components/Nav'
 import Home from './pages/Home'
 import Workflow from './pages/Workflow'
 import ReplayPage from './pages/ReplayPage'
-import Layers from './pages/Layers'
+import Built from './pages/Built'
 import ArtifactPage from './pages/ArtifactPage'
 import Knowledge from './pages/Knowledge'
 
@@ -18,7 +18,7 @@ function Routed() {
       case 'replay':
         return <ReplayPage />
       case 'layers':
-        return <Layers />
+        return <Built />
       case 'artifact':
         return <ArtifactPage id={route.param ?? ''} />
       case 'knowledge':
