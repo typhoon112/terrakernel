@@ -1,65 +1,79 @@
-<p align="center">
-  <a href="https://typhoon112.github.io/terrakernel/">
-    <img src="docs/assets/terrakernel-cover.png" alt="TerraKernel：将论文、标准、数据与代码编译为带证据的知识、Skills 和工具；以碳排放责任核算为演示案例" width="100%">
-  </a>
-</p>
-
-<h1 align="center">TerraKernel</h1>
+<h1 align="center">🌍 TerraKernel</h1>
 
 <p align="center">
   <strong>把科研资料，编译成 Agent 可以直接使用的研究仓库。</strong><br>
-  From research materials to agent-ready repositories.
+  <em>From research materials to agent-ready repositories.</em>
 </p>
 
 <p align="center">
-  <a href="https://typhoon112.github.io/terrakernel/"><img src="https://img.shields.io/badge/Explore-Live_Demo-4fe3a4?style=flat-square&amp;labelColor=12251c" alt="浏览在线演示"></a>
-  <a href="#安装"><img src="https://img.shields.io/badge/Python-3.12%2B-74a9f7?style=flat-square&amp;labelColor=12251c" alt="Python 3.12 及以上"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-PolyForm_Noncommercial-efb75a?style=flat-square&amp;labelColor=12251c" alt="PolyForm Noncommercial 非商业许可"></a>
+  <a href="https://typhoon112.github.io/terrakernel/"><strong>▶ 在线演示</strong></a> &nbsp;·&nbsp;
+  <a href="#安装"><strong>🚀 快速开始</strong></a> &nbsp;·&nbsp;
+  <a href="#如何工作">⚙️ 工作原理</a> &nbsp;·&nbsp;
+  <a href="#生成的仓库">📦 生成结果</a>
 </p>
 
 <p align="center">
-  <a href="https://typhoon112.github.io/terrakernel/"><strong>在线演示 ↗</strong></a> ·
-  <a href="#安装">快速开始</a> ·
-  <a href="#如何工作">工作原理</a> ·
-  <a href="#生成的仓库">生成结果</a> ·
-  <a href="#许可">使用许可</a>
+  <code>AI4Climate Hackathon</code> &nbsp; <code>Python 3.12+</code> &nbsp;
+  <a href="LICENSE"><strong>PolyForm Noncommercial</strong></a>
 </p>
 
----
+<p align="center">
+  <a href="https://typhoon112.github.io/terrakernel/">
+    <img src="docs/assets/terrakernel-cover.webp" alt="TerraKernel：将论文、标准、数据与代码编译为带证据的知识、Skills 和工具；以碳排放责任核算为演示案例" width="100%">
+  </a>
+</p>
 
-TerraKernel 是 **AI4Climate 黑客松参赛项目**，也是一个可在本机运行的科研资料编译工具。输入论文、文稿、网页快照、数据表、代码和图表，以及一句研究目标；输出一个普通文件夹，供 Claude Code、Codex 等 Agent 读取知识、调用工具、按 Skill 开展科研任务。
+> [!TIP]
+> **第一次来？** [打开在线演示](https://typhoon112.github.io/terrakernel/)，从一个真实的碳排放责任核算案例，看资料如何变成知识、Skills 和工具。想处理自己的资料，直接跳到[快速开始](#安装)。
 
-## 从资料到可用的研究能力
+TerraKernel 是 **AI4Climate 黑客松参赛项目**，也是一个可在本机运行的科研资料编译工具。
 
-| 知识有出处 | 方法可执行 | 变化可追踪 |
-| :--- | :--- | :--- |
-| 保留原文定位与摘录，区分资料陈述、模型推导和工具实测。 | Skills 组织研究步骤，工具附验证状态与测试依据。 | 统一 Agent 入口，支持影响追踪与局部更新。 |
+**📥 输入**：论文、文稿、网页快照、数据表、代码和图表，加上一句研究目标。<br>
+**📦 输出**：一个包含 **知识 + Skills + 工具 + Agent 入口** 的研究仓库，供 Claude Code、Codex 等 Agent 直接使用。
 
-## 看一次真实构建
+<a name="从资料到可用的研究能力"></a>
 
-**碳排放责任核算**：从分散的科研资料中提取定义、公式、参数与边界，再编成知识文档、研究流程和计算工具。
+## ✨ 从资料到可用的研究能力
 
-| 资料 | 证据单元 | 知识对象 | 生成产物 |
+- **🔎 知识有出处** — 保留原文定位与摘录，区分资料陈述、模型推导和工具实测。
+- **🧩 方法可执行** — 将研究步骤组织为 Skills，将计算方法编成附验证状态的工具。
+- **⚖️ 冲突看得见** — 不同定义并列保留；缺失信息进入待确认清单，留给研究者复核。
+- **🔄 变化可追踪** — 追踪资料与产物的依赖，支持资料更新后的局部重建。
+- **🤖 Agent 可接入** — 生成 `AGENTS.md`、`CLAUDE.md`、Agent Skills 与 MCP 工具接口。
+
+<a name="看一次真实构建"></a>
+
+## 🎬 看一次真实构建
+
+**演示案例 · 碳排放责任核算**<br>
+从分散的科研资料中提取定义、公式、参数与边界，再编成知识文档、研究流程和计算工具。
+
+| 📚 资料 | 🔎 证据单元 | 🧠 知识对象 | 📦 生成产物 |
 | :---: | :---: | :---: | :---: |
 | **177** | **80,077** | **16,827** | **36** |
 
-这次构建包含 **7 个 Skill、3 个工具，其中 2 个已用原文算例验证**。数据来自演示站点的[构建数据包](web/public/data/meta.json)，代表这一案例的构建结果，不是通用准确率或性能指标。
+**🧩 7 个 Skill** · **🛠️ 3 个工具** · **✅ 2 个工具已用原文算例验证**
 
-[![在线知识目录：知识分类、关系、来源与待确认问题](docs/assets/knowledge-preview.png)](https://typhoon112.github.io/terrakernel/#/knowledge)
-
-<p align="center"><sub>真实界面 · 知识分类、来源与冲突一览；点击图片进入可检索的知识目录。</sub></p>
+[![在线知识目录：知识分类、关系、来源与待确认问题](docs/assets/knowledge-preview.webp)](https://typhoon112.github.io/terrakernel/#/knowledge)
 
 <p align="center">
-  <a href="https://typhoon112.github.io/terrakernel/#/replay">观看构建回放 →</a> ·
-  <a href="https://typhoon112.github.io/terrakernel/#/layers">浏览生成结果 →</a> ·
-  <a href="https://typhoon112.github.io/terrakernel/#/knowledge">探索知识目录 →</a>
+  <a href="https://typhoon112.github.io/terrakernel/#/replay"><strong>▶ 看构建回放</strong></a> &nbsp;·&nbsp;
+  <a href="https://typhoon112.github.io/terrakernel/#/layers"><strong>📦 看生成结果</strong></a> &nbsp;·&nbsp;
+  <a href="https://typhoon112.github.io/terrakernel/#/knowledge"><strong>🔎 搜索知识目录</strong></a>
 </p>
 
-> 在线演示用于浏览已生成的结果；使用自己的资料，请通过下方命令行工具在本机构建。
+> [!NOTE]
+> 数字来自本案例的[构建数据包](web/public/data/meta.json)，不代表通用准确率或性能。**在线演示只浏览结果；处理自己的资料需在本机构建。**
 
-## 安装
+---
 
-需要 [uv](https://docs.astral.sh/uv/) 和 Python 3.12（由 uv 管理）。
+<a name="安装"></a>
+
+## 🚀 安装
+
+**环境准备：** [uv](https://docs.astral.sh/uv/) + **Python 3.12**（由 uv 管理）。
+
+### 1️⃣ 安装命令行工具
 
 下载或克隆本仓库后，在项目根目录执行：
 
@@ -70,13 +84,19 @@ terrakernel --help
 
 这会将 TerraKernel 安装为独立命令，之后可以在自己的工作目录运行。如果命令未出现在 PATH 中，执行 `uv tool update-shell` 并重新打开终端。开发本项目时使用 `uv sync` 和 `uv run terrakernel`；以下示例中的 `terrakernel` 也可替换为该开发命令。
 
-支持的资料格式：PDF（含双栏排版）、Word（`.docx`）、HTML 网页快照（`.html` / `.htm`）、Markdown、纯文本、CSV/TSV、Excel（`.xls` / `.xlsx` / `.xlsm`，按工作表）、Parquet、NetCDF（读取文件自带的单位、cell_methods 等属性）、Python 脚本与 Notebook、图片。
+**📄 支持的资料格式：** PDF（含双栏排版）、Word（`.docx`）、HTML 网页快照（`.html` / `.htm`）、Markdown、纯文本、CSV/TSV、Excel（`.xls` / `.xlsx` / `.xlsm`，按工作表）、Parquet、NetCDF（读取文件自带的单位、cell_methods 等属性）、Python 脚本与 Notebook、图片。
+
+### 2️⃣ 配置模型
 
 大模型调用使用 Anthropic Python SDK。运行前在环境变量中配置 `ANTHROPIC_API_KEY` 或 `ANTHROPIC_AUTH_TOKEN`；使用兼容网关时同时设置 `ANTHROPIC_BASE_URL`。密钥不写入项目文件。
 
 `terrakernel doctor` 用于检查模型端点及其结构化输出支持；程序会为不支持原生结构化输出的端点尝试兼容方式。模型可在首次构建或初始化时通过 `--model` 指定。
 
-## 使用自己的资料
+<a name="使用自己的资料"></a>
+
+## 📥 使用自己的资料
+
+### 3️⃣ 构建你的研究仓库
 
 外部资料的入口是一个目录。把论文、说明、数据和已有代码放在该目录中，再提供一句研究目标；任务文件和标准答案都不是构建的必填项。未提供任务或任务列表为空时，研究目标会成为默认任务 `research-goal`，供后续规划对应的知识、工具和 Skill。
 
@@ -93,11 +113,15 @@ terrakernel status artifacts/YYYYMMDD/my-research
 terrakernel gaps artifacts/YYYYMMDD/my-research
 ```
 
-首次构建使用新的或空的输出目录，不覆盖已有项目。已有项目继续使用 `terrakernel build <生成目录>`；修复导入失败的文件后也可用该命令重试。文件导入报告保存在生成目录的 `.terrakernel/ingest-report.json`，用于查看文件状态及原因。遇到解析失败时，构建停止并保留原知识库；已成功解析的文件留有缓存，修正对应资料后重试可复用有效结果。
+**首次构建使用新的或空的输出目录，不覆盖已有项目。**
+
+已有项目继续使用 `terrakernel build <生成目录>`；修复导入失败的文件后也可用该命令重试。文件导入报告保存在生成目录的 `.terrakernel/ingest-report.json`，用于查看文件状态及原因。遇到解析失败时，构建停止并保留原知识库；已成功解析的文件留有缓存，修正对应资料后重试可复用有效结果。
 
 构建后，先阅读生成目录中的 `AGENTS.md`，再让 Agent 打开该目录开展任务。资料变化后，对同一生成目录执行 `terrakernel update <生成目录>`；需要浏览或下载结果时执行 `terrakernel site <生成目录>` 导出静态页面。静态页面目前不提供上传或发起构建功能。
 
-## 如何工作
+<a name="如何工作"></a>
+
+## ⚙️ 如何工作
 
 ```mermaid
 flowchart TB
@@ -118,7 +142,9 @@ flowchart TB
 
 资料与产物之间保留依赖关系。每条抽取知识须通过原文引用校验；冲突并列保留，缺失信息进入待确认清单。生成的仓库同时保留知识的原文证据与工具的验证记录。
 
-## 生成的仓库
+<a name="生成的仓库"></a>
+
+## 📦 生成的仓库
 
 ```
 AGENTS.md / CLAUDE.md            入口：用途、规则、任务与 Skill、工具、数据、冲突、待确认问题
@@ -136,9 +162,11 @@ sources/                         原始资料副本（证据定位基准）
 待复核对象保留在完整目录中，但不用于规划工具和任务指南。每份指南只接收与自身对象、来源和任务相关的有限缺口上下文；所有未解决及已解决缺口仍保存在 `knowledge/gaps.md` 和 `gaps.jsonl`，未出现在某份指南中不表示已解决。缺口可能来自局部证据批次或关联分组，属于待复核报告，不能据此断言整批资料都缺失；仓库入口优先展示规划后与任务相关的能力限制。下载包使用相对资料路径，保留原始资料、知识库、工具和指南，排除构建缓存与本地运行日志。
 
 <details>
-<summary>设计原则：证据、冲突、验证与生态兼容</summary>
+<summary><strong>🧭 深入设计：证据、冲突、验证与生态兼容</strong></summary>
 
-## 设计原则
+<a name="设计原则"></a>
+
+## 🧭 设计原则
 
 - **证据优先**：资料先被拆成可定位的证据单元（PDF 页码与坐标、Word 章节与段落或表格、Markdown/HTML 行号、数据列、代码函数与行号）。抽取出的每条知识都必须引用证据并附逐字摘录，由代码校验；对不上原文的知识不会被当作可信知识。
 - **围绕目标组织知识**：保留原始资料及解析得到的证据，再围绕研究目标和任务抽取定义、方法、约束、数据与能力。每批证据都进入抽取流程，但无关章节、重复目录或空白页可以不产生知识对象；完整知识目录收录全部已抽取对象，不等于穷尽原始资料中的每个事实。
@@ -156,9 +184,11 @@ sources/                         原始资料副本（证据定位基准）
 </details>
 
 <details>
-<summary>示例与进阶命令：更新、人工回答、评测与缓存</summary>
+<summary><strong>🛠️ 进阶操作：更新、人工回答、评测与缓存</strong></summary>
 
-## 示例与进阶命令
+<a name="示例与进阶命令"></a>
+
+## 🛠️ 示例与进阶命令
 
 以下命令在源码仓库根目录运行，以开发样例（风电预测评测，合成数据）为例。需要先查看或调整配置再构建时，仍可使用分开的 `init` 和 `build`：
 
@@ -224,9 +254,11 @@ uv run terrakernel serve artifacts/YYYYMMDD/demo/site --port 8765
 </details>
 
 <details>
-<summary>展示站点：导出、预览与 GitHub Pages 发布</summary>
+<summary><strong>🌐 展示站点：导出、预览与 GitHub Pages 发布</strong></summary>
 
-## 展示站点
+<a name="展示站点"></a>
+
+## 🌐 展示站点
 
 `terrakernel site` 从构建结果生成静态站点，内容全部来自仓库本身，不需要手写：
 
@@ -261,7 +293,9 @@ uv run terrakernel export-web <构建好的仓库> --out web/public/data \
 
 </details>
 
-## 产品交付与下一步
+<a name="产品交付与下一步"></a>
+
+## 🗺️ 产品交付与下一步
 
 交付给使用者的是 **可安装的 TerraKernel 命令行工具、使用说明和完整示例**。本 GitHub 仓库提供工具源码；使用者输入自己的外部资料和研究目标后，工具生成可交给 Agent 使用的科研仓库。这里的“输入入口”指资料接入，第一版使用本地资料目录。
 
@@ -276,9 +310,11 @@ uv run terrakernel export-web <构建好的仓库> --out web/public/data \
 模型对比评测用于补充验证，网页用于浏览结果；它们不作为第一版资料输入入口的交付前提。
 
 <details>
-<summary>开发者入口：项目结构</summary>
+<summary><strong>🗂️ 开发者入口：项目结构</strong></summary>
 
-## 项目结构
+<a name="项目结构"></a>
+
+## 🗂️ 项目结构
 
 ```
 src/terrakernel/
@@ -303,7 +339,9 @@ tests/                         离线单元测试（不调用模型）
 
 </details>
 
-## 范围与限制
+<a name="范围与限制"></a>
+
+## 📌 范围与限制
 
 - 当前提供命令行构建、资料更新、人工回答待确认问题，以及只读静态展示站点。
 - Word 解析保留正文段落、表格、可解码图片及其位置；公式保留 OMML 原结构与可见文本，尚不重建数学排版。无法解码的图片和 OLE 嵌入对象明确记录为未解析，原件保留在 DOCX 中，不能据此宣称公式或图中数据已完整识别。
@@ -314,11 +352,14 @@ tests/                         离线单元测试（不调用模型）
 
 开发记录、运行日志和逐次评测结果保存在本地 `artifacts/YYYYMMDD/<任务>/`，不随源码分发。协作约定见 [AGENTS.md](AGENTS.md)。
 
-## 许可
+<a name="许可"></a>
+
+## ⚖️ 许可
 
 TerraKernel 的原创代码、文档及前端采用 [PolyForm Noncommercial License 1.0.0](LICENSE)，允许按许可条款进行非商业使用、复制、修改和分发。分发时须保留许可条款或其链接，以及 [NOTICE](NOTICE) 中的必要声明。许可明确允许的用途以英文原文为准；未被该许可覆盖的商业用途，需要向相应权利人另行取得授权，可通过 [GitHub Issues](https://github.com/typhoon112/terrakernel/issues) 联系项目维护者。
 
-这是**非商业源码可用许可（source-available）**，由于限制商业用途，不属于 OSI 定义的开源许可证。
+> [!IMPORTANT]
+> 本项目采用**非商业源码可用许可（source-available）**，不属于 OSI 定义的开源许可证。未被许可覆盖的商业用途，需要另行取得授权。
 
 第三方依赖、字体与研究资料不因本项目许可而改变其授权：
 
