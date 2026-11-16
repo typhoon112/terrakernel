@@ -161,6 +161,15 @@ uv run terrakernel serve artifacts/YYYYMMDD/demo/site --port 8765
 
 站点不引用任何外部资源（字体为自托管的 IBM Plex，OFL 许可），导出时会检查并拒绝写入密钥和本机路径。
 
+### 黑客松展示网站（`web/`）
+
+`web/` 是一个独立的 Vite + React 站点，用于黑客松演示，主案例为碳排放责任核算（177 份资料 / 80,077 证据 / 16,827 知识对象 / 34 个产物）。
+
+- **数据来源**：`terrakernel export-web <构建好的仓库> --out web/public/data` 从仓库导出 JSON 数据包（约 12 MB，含 72 张精选原文截图）。站点不连接数据库、不调用模型，页面上的每个数字、每条原文摘录、每个测试结果都来自这次导出。
+- **页面**：工作流总览、构建回放（按真实构建日志压缩演示）、三层结果（知识 / Skill / 工具）、出处链（工具 → 知识对象 → 证据 → 资料）、知识目录（16,827 条可检索）、方法与限制。
+- **构建与预览**：`npm --prefix web ci && npm --prefix web run build`，产物在 `web/dist`；`npm --prefix web run dev` 用于本地预览。
+- **发布**：推送到 `main` 后由 `.github/workflows/pages.yml` 构建并发布到 GitHub Pages。`web/public/data/` 需要先导出并提交。
+
 ## 生成的仓库
 
 ```
@@ -188,13 +197,16 @@ src/terrakernel/
   plan/        Repository Spec 规划与校验
   compile/     工具（复用 / 实现 + 验证）、知识文档、Skills、入口、适配器
   validate/    结构、规范、链接、测试、MCP 检查
-  site/        展示站点生成器（页面、图表、原文截图、字体）
+  site/        静态展示站点生成器（报告式，较早版本）
+  export_web.py  前端数据包导出（工具 → 知识 → 证据 → 资料的完整出处链）
   update/      资料变化后的增量同步与影响报告
   agent/       内置 Agent、沙箱、评分、对比实验
   builtin/     Builder Skills（各阶段的模型指令）与生成仓库的模板
 examples/wind-forecast-eval/   开发样例 1：风电预测评测（CSV、Markdown、PDF、旧脚本）
 examples/heatwave-days/        开发样例 2：城市热浪天数（NetCDF、Markdown、PDF、旧脚本）
 demo/                          展示站点的标题配置与说明
+web/                           黑客松展示网站（Vite + React；数据来自 export-web）
+.github/workflows/pages.yml    GitHub Pages 构建与发布
 tests/                         离线单元测试（不调用模型）
 ```
 
@@ -208,3 +220,7 @@ tests/                         离线单元测试（不调用模型）
 - 构建和 Agent 任务会调用所配置的模型并产生费用。模型响应缓存位于生成仓库的 `.terrakernel/llm-cache/`，可用 `TK_LLM_MODE=replay` 离线重放已有请求。
 
 开发记录、运行日志和逐次评测结果保存在本地 `artifacts/YYYYMMDD/<任务>/`，不随源码分发。协作约定见 [AGENTS.md](AGENTS.md)。
+
+## 许可
+
+本仓库为 AI4Climate 黑客松参赛作品。在黑客松评审与展示期间保留所有权利，暂未附开源许可。第三方资料的版权归各自权利人；`web/public/data/` 中出现的原文摘录与页面截图仅用于说明 TerraKernel 的构建过程。

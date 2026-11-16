@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@font-face { font-family: "Plex Sans"; src: url("/fonts/plex-sans-var.woff2") format("woff2-variations"); font-weight: 100 700; font-display: swap; }
+@font-face { font-family: "Plex Sans"; src: url("/fonts/plex-sans-400-italic.woff2") format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Plex Serif"; src: url("/fonts/plex-serif-500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Plex Serif"; src: url("/fonts/plex-serif-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Plex Serif"; src: url("/fonts/plex-serif-500-italic.woff2") format("woff2"); font-weight: 500; font-style: italic; font-display: swap; }
+@font-face { font-family: "Plex Mono"; src: url("/fonts/plex-mono-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Plex Mono"; src: url("/fonts/plex-mono-500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+
+@theme {
+  --color-void: #070a09;
+  --color-deep: #0a0f0d;
+  --color-panel: #0e1512;
+  --color-panel-2: #121a16;
+  --color-line: rgba(214, 234, 223, 0.09);
+  --color-line-2: rgba(214, 234, 223, 0.18);
+  --color-ink: #e9efe9;
+  --color-mute: #8d9a92;
+  --color-faint: #5e6a63;
+  --color-mint: #4fe3a4;
+  --color-mint-2: #22b57c;
+  --color-amber: #efb75a;
+  --color-sky: #74a9f7;
+  --color-rose: #ef7a7a;
+  --color-violet: #b39dfa;
+  --font-sans: "Plex Sans", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-serif: "Plex Serif", "Songti SC", "Noto Serif CJK SC", Georgia, serif;
+  --font-mono: "Plex Mono", "PingFang SC", ui-monospace, monospace;
+}
+
+html { scroll-behavior: smooth; }
+body {
+  background: var(--color-void);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: rgba(79, 227, 164, 0.28); color: #fff; }
+* { scrollbar-width: thin; scrollbar-color: #26332c transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: #26332c; border-radius: 8px; }
+
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(214, 234, 223, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(214, 234, 223, 0.045) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+.bg-radial {
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(34, 181, 124, 0.16), transparent 60%),
+    radial-gradient(900px 500px at 85% 15%, rgba(116, 169, 247, 0.07), transparent 60%),
+    radial-gradient(700px 500px at 10% 60%, rgba(239, 183, 90, 0.05), transparent 60%);
+}
+.noise::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 60; opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.panel { background: linear-gradient(180deg, rgba(20, 30, 25, 0.75), rgba(12, 18, 15, 0.9)); border: 1px solid var(--color-line); }
+.panel-hover:hover { border-color: var(--color-line-2); background: linear-gradient(180deg, rgba(24, 36, 30, 0.85), rgba(14, 21, 17, 0.95)); }
+.hairline { border-top: 1px solid var(--color-line); }
+.mono { font-family: var(--font-mono); }
+.display { font-family: var(--font-serif); letter-spacing: -0.02em; }
+.glow-mint { box-shadow: 0 0 0 1px rgba(79, 227, 164, 0.25), 0 0 40px -8px rgba(79, 227, 164, 0.35); }
+.text-glow { text-shadow: 0 0 30px rgba(79, 227, 164, 0.35); }
+
+.tabular { font-variant-numeric: tabular-nums; }
+.clip-corner { clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px)); }
+
+.reveal { opacity: 0; transform: translateY(14px); }
+.reveal.in { opacity: 1; transform: none; transition: opacity 0.7s cubic-bezier(.2,.7,.2,1), transform 0.7s cubic-bezier(.2,.7,.2,1); }
+
+@keyframes pulseLine { 0%, 100% { opacity: 0.35 } 50% { opacity: 1 } }
+.pulse { animation: pulseLine 2.4s ease-in-out infinite; }
+
+@keyframes flowDash { to { stroke-dashoffset: -24; } }
+.flow-line { stroke-dasharray: 4 8; animation: flowDash 1.2s linear infinite; }
+
+.scroll-x { overflow-x: auto; }
+
+@media print {
+  body { background: #fff; color: #000; }
+  nav, .no-print { display: none !important; }
+}

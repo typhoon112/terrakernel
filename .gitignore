@@ -11,3 +11,7 @@ __pycache__/
 /dist/
 .pytest_cache/
 .ruff_cache/
+/web/node_modules/
+/web/dist/
+# web/public/data/ holds the exported data bundle and is committed: it is the site's content.
+/web/tsconfig.tsbuildinfo

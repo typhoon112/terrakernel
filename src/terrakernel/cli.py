@@ -443,6 +443,24 @@ def gallery(
     console.print(result)
 
 
+@app.command("export-web")
+def export_web_cmd(
+    repo: Annotated[Path, typer.Argument()],
+    out: Annotated[Path, typer.Option(help="Output directory for the data bundle")],
+    max_crops: Annotated[int, typer.Option(help="Maximum number of PDF page crops to render")] = 240,
+) -> None:
+    """Export the data bundle for the showcase web frontend (no model calls)."""
+    from terrakernel.export_web import export_web
+
+    project = Project.open(repo)
+    summary = export_web(project, out, max_crops=max_crops)
+    if summary["leaks"]:
+        console.print("[red]possible secrets or local paths in the bundle:[/]")
+        for p in summary["leaks"]:
+            console.print(f"  {p}")
+    console.print_json(json.dumps(summary, ensure_ascii=False, default=str))
+
+
 @app.command()
 def serve(
     path: Annotated[Path, typer.Argument(help="Directory to serve (a site/ folder, or a repository)")],

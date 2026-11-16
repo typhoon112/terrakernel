@@ -46,6 +46,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/terrakernel"]
 
+# The showcase site and its data bundle are published through GitHub Pages, not with the package.
+[tool.hatch.build.targets.sdist]
+exclude = ["/web", "/.github"]
+
 [tool.ruff]
 line-length = 110
 target-version = "py312"
