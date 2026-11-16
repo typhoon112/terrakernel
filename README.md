@@ -1,48 +1,61 @@
-# TerraKernel
+<p align="center">
+  <a href="https://typhoon112.github.io/terrakernel/">
+    <img src="docs/assets/terrakernel-cover.png" alt="TerraKernel：将论文、标准、数据与代码编译为带证据的知识、Skills 和工具；以碳排放责任核算为演示案例" width="100%">
+  </a>
+</p>
 
-TerraKernel 是 AI4Climate 黑客松参赛项目，也是一个可在本机运行的科研资料编译工具。
+<h1 align="center">TerraKernel</h1>
 
-它把一批多模态科研资料编译成 Agent 可以直接使用的 **AI-Native 科研仓库**。资料可以是论文 PDF、Word 文稿、网页快照、数据表、已有代码和图表。
+<p align="center">
+  <strong>把科研资料，编译成 Agent 可以直接使用的研究仓库。</strong><br>
+  From research materials to agent-ready repositories.
+</p>
 
-```
-原始资料 ──ingest──▶ 证据单元 ──extract──▶ 结构化知识 ──reconcile──▶ 关联、冲突、缺口
-                                                        │
-             AI-Native 仓库 ◀──compile── Repository Spec ◀──plan──┘
-             （知识、工具、Skills、入口）        │
-                       └──validate──▶ 结构检查、工具测试、任务验证
-资料变化 ──update──▶ 局部重抽取 → 影响追踪 → 只重建受影响产物 → 复验
-```
+<p align="center">
+  <a href="https://typhoon112.github.io/terrakernel/"><img src="https://img.shields.io/badge/Explore-Live_Demo-4fe3a4?style=flat-square&amp;labelColor=12251c" alt="浏览在线演示"></a>
+  <a href="#安装"><img src="https://img.shields.io/badge/Python-3.12%2B-74a9f7?style=flat-square&amp;labelColor=12251c" alt="Python 3.12 及以上"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-PolyForm_Noncommercial-efb75a?style=flat-square&amp;labelColor=12251c" alt="PolyForm Noncommercial 非商业许可"></a>
+</p>
 
-生成的仓库是一个普通文件夹。Claude Code、Codex 等 Agent 进入后可以直接读取知识、调用工具、按 Skill 完成科研任务。仓库同时保留每一条知识的原文证据和每个工具的验证记录。
+<p align="center">
+  <a href="https://typhoon112.github.io/terrakernel/"><strong>在线演示 ↗</strong></a> ·
+  <a href="#安装">快速开始</a> ·
+  <a href="#如何工作">工作原理</a> ·
+  <a href="#生成的仓库">生成结果</a> ·
+  <a href="#许可">使用许可</a>
+</p>
 
-## 产品交付与下一步
+---
 
-交付给使用者的是 **可安装的 TerraKernel 命令行工具、使用说明和完整示例**。本 GitHub 仓库提供工具源码；使用者输入自己的外部资料和研究目标后，工具生成可交给 Agent 使用的科研仓库。这里的“输入入口”指资料接入，第一版使用本地资料目录。
+TerraKernel 是 **AI4Climate 黑客松参赛项目**，也是一个可在本机运行的科研资料编译工具。输入论文、文稿、网页快照、数据表、代码和图表，以及一句研究目标；输出一个普通文件夹，供 Claude Code、Codex 等 Agent 读取知识、调用工具、按 Skill 开展科研任务。
 
-当前已提供统一构建入口：一次输入资料目录、研究目标和输出目录，即可初始化并启动完整构建。普通构建不要求任务 YAML 或标准答案；原有分开的 `init`、`build` 命令继续可用。
+## 从资料到可用的研究能力
 
-导入过程会报告文件的解析、跳过和失败情况；成功后给出生成目录、`AGENTS.md` 入口、待确认问题及后续操作。已有更新、人工回答和静态展示能力继续复用同一套仓库与流水线。
+| 知识有出处 | 方法可执行 | 变化可追踪 |
+| :--- | :--- | :--- |
+| 保留原文定位与摘录，区分资料陈述、模型推导和工具实测。 | Skills 组织研究步骤，工具附验证状态与测试依据。 | 统一 Agent 入口，支持影响追踪与局部更新。 |
 
-**已完成真实资料全流程构建。** 分发包已在独立环境安装，并用于外部科研资料的导入、完整模型构建、仓库检查和实际任务使用；生成的知识、工具和 Skills 可从统一入口找到。已验证资料未变化时更新不会重新调用模型。工具按独立原文算例验证、仅性质检查和不可用分别标记；构建通过不代表全部研究结论已核实。
+## 看一次真实构建
 
-**下一步：实际资料变化后的持续使用。** 增量更新能力已有实现，真实大资料库的新增文件、正文修改和人工补充答案仍需在后续使用中验收。当前资料入口为本地目录，浏览页面不提供上传或在线构建。
+**碳排放责任核算**：从分散的科研资料中提取定义、公式、参数与边界，再编成知识文档、研究流程和计算工具。
 
-模型对比评测用于补充验证，网页用于浏览结果；它们不作为第一版资料输入入口的交付前提。
+| 资料 | 证据单元 | 知识对象 | 生成产物 |
+| :---: | :---: | :---: | :---: |
+| **177** | **80,077** | **16,827** | **36** |
 
-## 设计原则
+这次构建包含 **7 个 Skill、3 个工具，其中 2 个已用原文算例验证**。数据来自演示站点的[构建数据包](web/public/data/meta.json)，代表这一案例的构建结果，不是通用准确率或性能指标。
 
-- **证据优先**：资料先被拆成可定位的证据单元（PDF 页码与坐标、Word 章节与段落或表格、Markdown/HTML 行号、数据列、代码函数与行号）。抽取出的每条知识都必须引用证据并附逐字摘录，由代码校验；对不上原文的知识不会被当作可信知识。
-- **围绕目标组织知识**：保留原始资料及解析得到的证据，再围绕研究目标和任务抽取定义、方法、约束、数据与能力。每批证据都进入抽取流程，但无关章节、重复目录或空白页可以不产生知识对象；完整知识目录收录全部已抽取对象，不等于穷尽原始资料中的每个事实。
-- **来源分类**：知识按来源分为“资料陈述 / 模型推导 / 工具实测 / 人工确认”四类，分别记录，不合成一个置信度。
-- **冲突保留**：同名但定义不同的内容（例如两种 NRMSE）保留为两个方法，挂在同一个上位概念下，并标注冲突。资料中有约定时，由约定决定采用哪一个。
-- **缺口不补**：资料没写的内容（单位、时间戳语义、预测发布时间等）记录为缺口，不用常识补默认值，并在仓库入口列为待确认问题。
-- **工具先验证再开放**：
-  - 已有代码原样复用，只加输入检查。
-  - 只有公式的方法由模型实现，但必须通过从资料中**摘录**的算例（输入与期望值都来自原文并附出处）才标记为 verified。
-  - 实现代码看不到期望值；测试期望值也不允许由实现计算得出。
-- **数据语义可执行**：单位、时间戳约定、时变参数（如装机容量生效日期）被编译成配置。生成仓库的数据运行时按配置自动换算，Agent 不必自己推断。
-- **兼容现有生态**：知识层遵循 Google Open Knowledge Format v0.2；Skills 遵循 Agent Skills 规范（`.agents/skills`，并镜像到 `.claude/skills`）；工具通过 MCP 暴露；入口文件为 `AGENTS.md` 和 `CLAUDE.md`。
-- **可管理**：记录“资料 → 证据 → 知识 → 产物”的依赖。资料更新后，只重抽取受影响的知识；未变的产物来自缓存，文件不被改动。
+[![在线知识目录：知识分类、关系、来源与待确认问题](docs/assets/knowledge-preview.png)](https://typhoon112.github.io/terrakernel/#/knowledge)
+
+<p align="center"><sub>真实界面 · 知识分类、来源与冲突一览；点击图片进入可检索的知识目录。</sub></p>
+
+<p align="center">
+  <a href="https://typhoon112.github.io/terrakernel/#/replay">观看构建回放 →</a> ·
+  <a href="https://typhoon112.github.io/terrakernel/#/layers">浏览生成结果 →</a> ·
+  <a href="https://typhoon112.github.io/terrakernel/#/knowledge">探索知识目录 →</a>
+</p>
+
+> 在线演示用于浏览已生成的结果；使用自己的资料，请通过下方命令行工具在本机构建。
 
 ## 安装
 
@@ -83,6 +96,67 @@ terrakernel gaps artifacts/YYYYMMDD/my-research
 首次构建使用新的或空的输出目录，不覆盖已有项目。已有项目继续使用 `terrakernel build <生成目录>`；修复导入失败的文件后也可用该命令重试。文件导入报告保存在生成目录的 `.terrakernel/ingest-report.json`，用于查看文件状态及原因。遇到解析失败时，构建停止并保留原知识库；已成功解析的文件留有缓存，修正对应资料后重试可复用有效结果。
 
 构建后，先阅读生成目录中的 `AGENTS.md`，再让 Agent 打开该目录开展任务。资料变化后，对同一生成目录执行 `terrakernel update <生成目录>`；需要浏览或下载结果时执行 `terrakernel site <生成目录>` 导出静态页面。静态页面目前不提供上传或发起构建功能。
+
+## 如何工作
+
+```mermaid
+flowchart TB
+    A["科研资料<br/>论文 · 文稿 · 数据 · 代码"] -->|ingest| B["可定位的证据"]
+    B -->|extract| C["结构化知识"]
+    C -->|reconcile| D["关联 · 冲突 · 缺口"]
+    D -->|plan| E["仓库规格"]
+    E -->|compile| F["AI-Native 科研仓库<br/>知识 · Skills · 工具 · 入口"]
+    F -->|validate| G["结构检查 · 工具测试 · 任务验证"]
+    H["资料变化"] -.->|update · 影响追踪与局部重建| B
+    classDef input fill:#10251c,stroke:#4fe3a4,color:#e9efe9
+    classDef knowledge fill:#152236,stroke:#74a9f7,color:#e9efe9
+    classDef output fill:#2b2516,stroke:#efb75a,color:#e9efe9
+    class A,B,H input
+    class C,D,E knowledge
+    class F,G output
+```
+
+资料与产物之间保留依赖关系。每条抽取知识须通过原文引用校验；冲突并列保留，缺失信息进入待确认清单。生成的仓库同时保留知识的原文证据与工具的验证记录。
+
+## 生成的仓库
+
+```
+AGENTS.md / CLAUDE.md            入口：用途、规则、任务与 Skill、工具、数据、冲突、待确认问题
+knowledge/                       OKF v0.2 知识包、完整知识目录 catalog.*、完整缺口登记 gaps.*
+.agents/skills/<name>/SKILL.md   领域 Skills（.claude/skills/ 为逐字镜像）
+tools/research_tools/            数据运行时 + 已验证工具 + config/（数据语义）+ registry.json
+tools/mcp_server.py              MCP 服务（只暴露已验证工具）；.mcp.json、.codex/config.toml
+tests/                           工具与运行时测试（参考算例来自资料原文）
+sources/                         原始资料副本（证据定位基准）
+.terrakernel/                    知识库 kb.sqlite、spec.yaml、lineage.json、validation.json、运行记录
+```
+
+当完整知识目录压缩后仍超出规划预算时，规划器按研究目标、任务、来源与关联关系选取工作集，并在 `.terrakernel/planning-coverage.json` 记录选择数、已选和未选对象及缺口覆盖。任务指南只围绕该工作集组织；全部已抽取对象及其原文引用、来源位置仍可从 `knowledge/index.md` 进入完整目录检索，原始证据保存在知识库中。
+
+待复核对象保留在完整目录中，但不用于规划工具和任务指南。每份指南只接收与自身对象、来源和任务相关的有限缺口上下文；所有未解决及已解决缺口仍保存在 `knowledge/gaps.md` 和 `gaps.jsonl`，未出现在某份指南中不表示已解决。缺口可能来自局部证据批次或关联分组，属于待复核报告，不能据此断言整批资料都缺失；仓库入口优先展示规划后与任务相关的能力限制。下载包使用相对资料路径，保留原始资料、知识库、工具和指南，排除构建缓存与本地运行日志。
+
+<details>
+<summary>设计原则：证据、冲突、验证与生态兼容</summary>
+
+## 设计原则
+
+- **证据优先**：资料先被拆成可定位的证据单元（PDF 页码与坐标、Word 章节与段落或表格、Markdown/HTML 行号、数据列、代码函数与行号）。抽取出的每条知识都必须引用证据并附逐字摘录，由代码校验；对不上原文的知识不会被当作可信知识。
+- **围绕目标组织知识**：保留原始资料及解析得到的证据，再围绕研究目标和任务抽取定义、方法、约束、数据与能力。每批证据都进入抽取流程，但无关章节、重复目录或空白页可以不产生知识对象；完整知识目录收录全部已抽取对象，不等于穷尽原始资料中的每个事实。
+- **来源分类**：知识按来源分为“资料陈述 / 模型推导 / 工具实测 / 人工确认”四类，分别记录，不合成一个置信度。
+- **冲突保留**：同名但定义不同的内容（例如两种 NRMSE）保留为两个方法，挂在同一个上位概念下，并标注冲突。资料中有约定时，由约定决定采用哪一个。
+- **缺口不补**：资料没写的内容（单位、时间戳语义、预测发布时间等）记录为缺口，不用常识补默认值，并在仓库入口列为待确认问题。
+- **工具先验证再开放**：
+  - 已有代码原样复用，只加输入检查。
+  - 只有公式的方法由模型实现，但必须通过从资料中**摘录**的算例（输入与期望值都来自原文并附出处）才标记为 verified。
+  - 实现代码看不到期望值；测试期望值也不允许由实现计算得出。
+- **数据语义可执行**：单位、时间戳约定、时变参数（如装机容量生效日期）被编译成配置。生成仓库的数据运行时按配置自动换算，Agent 不必自己推断。
+- **兼容现有生态**：知识层遵循 Google Open Knowledge Format v0.2；Skills 遵循 Agent Skills 规范（`.agents/skills`，并镜像到 `.claude/skills`）；工具通过 MCP 暴露；入口文件为 `AGENTS.md` 和 `CLAUDE.md`。
+- **可管理**：记录“资料 → 证据 → 知识 → 产物”的依赖。资料更新后，只重抽取受影响的知识；未变的产物来自缓存，文件不被改动。
+
+</details>
+
+<details>
+<summary>示例与进阶命令：更新、人工回答、评测与缓存</summary>
 
 ## 示例与进阶命令
 
@@ -147,6 +221,11 @@ uv run terrakernel serve artifacts/YYYYMMDD/demo/site --port 8765
 
 **并发**：知识抽取、知识文档和 Skills 编译可并发执行；环境变量 `TK_CONCURRENCY` 控制同时进行的模型请求数，默认值为 `3`。解析缓存和并发共用标准构建入口。
 
+</details>
+
+<details>
+<summary>展示站点：导出、预览与 GitHub Pages 发布</summary>
+
 ## 展示站点
 
 `terrakernel site` 从构建结果生成静态站点，内容全部来自仓库本身，不需要手写：
@@ -163,7 +242,7 @@ uv run terrakernel serve artifacts/YYYYMMDD/demo/site --port 8765
 
 ### 黑客松展示网站（`web/`）
 
-`web/` 是一个独立的 Vite + React 站点，用于黑客松演示，主案例为碳排放责任核算（177 份资料 / 80,077 证据 / 16,827 知识对象 / 36 个产物 / 7 个 Skill / 3 个工具，其中 2 个已用原文算例验证）。
+`web/` 是一个独立的 Vite + React 站点，用于黑客松演示，主案例为[碳排放责任核算](#看一次真实构建)。
 
 页面把案例本身画出来，而不是罗列文字：发电厂责任图（原文表 40 的电厂按度电责任排在零线上下）可代入参数实时计算；产业链责任传递图（原文课例 427–430）；资料库地图（177 份资料按来源分组，块大小是抽出的知识量，点开看每份资料贡献的知识与原文图）；构建回放（各阶段的耗时与调用次数按日志压缩播放，多次运行合并为一次）。数据包还带有一次真实的 Agent 运行记录（用生成的工具算 GHG Protocol 表 6.6 的电网平均因子，`agentrun.json`），页面暂未展示。
 
@@ -180,22 +259,24 @@ uv run terrakernel export-web <构建好的仓库> --out web/public/data \
 
 `--exhibit` 指定要原样展示的证据（表格导出为单元格，段落导出为文本），首页的三张图都从这些证据里读数，页面里不写死任何数值。
 
-## 生成的仓库
+</details>
 
-```
-AGENTS.md / CLAUDE.md            入口：用途、规则、任务与 Skill、工具、数据、冲突、待确认问题
-knowledge/                       OKF v0.2 知识包、完整知识目录 catalog.*、完整缺口登记 gaps.*
-.agents/skills/<name>/SKILL.md   领域 Skills（.claude/skills/ 为逐字镜像）
-tools/research_tools/            数据运行时 + 已验证工具 + config/（数据语义）+ registry.json
-tools/mcp_server.py              MCP 服务（只暴露已验证工具）；.mcp.json、.codex/config.toml
-tests/                           工具与运行时测试（参考算例来自资料原文）
-sources/                         原始资料副本（证据定位基准）
-.terrakernel/                    知识库 kb.sqlite、spec.yaml、lineage.json、validation.json、运行记录
-```
+## 产品交付与下一步
 
-当完整知识目录压缩后仍超出规划预算时，规划器按研究目标、任务、来源与关联关系选取工作集，并在 `.terrakernel/planning-coverage.json` 记录选择数、已选和未选对象及缺口覆盖。任务指南只围绕该工作集组织；全部已抽取对象及其原文引用、来源位置仍可从 `knowledge/index.md` 进入完整目录检索，原始证据保存在知识库中。
+交付给使用者的是 **可安装的 TerraKernel 命令行工具、使用说明和完整示例**。本 GitHub 仓库提供工具源码；使用者输入自己的外部资料和研究目标后，工具生成可交给 Agent 使用的科研仓库。这里的“输入入口”指资料接入，第一版使用本地资料目录。
 
-待复核对象保留在完整目录中，但不用于规划工具和任务指南。每份指南只接收与自身对象、来源和任务相关的有限缺口上下文；所有未解决及已解决缺口仍保存在 `knowledge/gaps.md` 和 `gaps.jsonl`，未出现在某份指南中不表示已解决。缺口可能来自局部证据批次或关联分组，属于待复核报告，不能据此断言整批资料都缺失；仓库入口优先展示规划后与任务相关的能力限制。下载包使用相对资料路径，保留原始资料、知识库、工具和指南，排除构建缓存与本地运行日志。
+当前已提供统一构建入口：一次输入资料目录、研究目标和输出目录，即可初始化并启动完整构建。普通构建不要求任务 YAML 或标准答案；原有分开的 `init`、`build` 命令继续可用。
+
+导入过程会报告文件的解析、跳过和失败情况；成功后给出生成目录、`AGENTS.md` 入口、待确认问题及后续操作。已有更新、人工回答和静态展示能力继续复用同一套仓库与流水线。
+
+**已完成真实资料全流程构建。** 分发包已在独立环境安装，并用于外部科研资料的导入、完整模型构建、仓库检查和实际任务使用；生成的知识、工具和 Skills 可从统一入口找到。已验证资料未变化时更新不会重新调用模型。工具按独立原文算例验证、仅性质检查和不可用分别标记；构建通过不代表全部研究结论已核实。
+
+**下一步：实际资料变化后的持续使用。** 增量更新能力已有实现，真实大资料库的新增文件、正文修改和人工补充答案仍需在后续使用中验收。当前资料入口为本地目录，浏览页面不提供上传或在线构建。
+
+模型对比评测用于补充验证，网页用于浏览结果；它们不作为第一版资料输入入口的交付前提。
+
+<details>
+<summary>开发者入口：项目结构</summary>
 
 ## 项目结构
 
@@ -219,6 +300,8 @@ web/                           黑客松展示网站（Vite + React；数据来�
 .github/workflows/pages.yml    GitHub Pages 构建与发布
 tests/                         离线单元测试（不调用模型）
 ```
+
+</details>
 
 ## 范围与限制
 
